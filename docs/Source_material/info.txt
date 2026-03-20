@@ -1,0 +1,3 @@
+lisätietoja lähteistä
+https://www.kaggle.com/datasets/krishujeniya/fitness-tracker-accelerometer-and-gyroscope-data
+otettu dataa käyttöliittymän testausta varten
