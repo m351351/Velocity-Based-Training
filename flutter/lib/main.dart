@@ -7,18 +7,6 @@ import 'dart:async';
 import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 
-Future<void> fetchData() async {
-  // HUOM: Käytä tietokoneesi IP-osoitetta (esim. 192.168.x.x) localhostin sijaan, 
-  // jos testaat oikealla puhelimella/emulaattorilla!
-  final response = await http.get(Uri.parse('http://10.4.0.221/vbt_project/get_data.php'));
-
-  if (response.statusCode == 200) {
-    List<dynamic> data = json.decode(response.body);
-    print(data); // Tässä näet kiihtyvyysanturin lukemat Flutter-konsolissa!
-  } else {
-    print('Haku epäonnistui');
-  }
-}
 
 
 void main() {
@@ -58,21 +46,7 @@ class _VBTPageState extends State<VBTPage> {
     super.initState();
 
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      setState(() {
-        _t += 0.1; // Simuloidaan ajan kulumista
-        _x += 1.0;
-        _velocitySpots.add(FlSpot(_x, currentVelocity));
-        
-        if (_velocitySpots.length > 100) {
-          _velocitySpots.removeAt(0); // graafin skaalaus viimeiseen 100 pisteesee 
-        } // uusi datapiste graafiin
-        // perusmuoto: siniaalto ja pieni satunnaisuus
-        final base = 0.9 + 0.6 * sin(_t); // simuloidaan nosto ja laskuvaihetta
-        final noise = (_random.nextDouble() - 0.5) * 0.08; // satunnaista kohinaa
-
-        // Ei anneta nopeuden mennä negatiiviseksi tässä mock-datassa
-        currentVelocity = max(0.0, base + noise);
-            });
+      fetchData();
   });
 }
 @override
@@ -106,6 +80,35 @@ void dispose() {
     "Takakyykky",
     "Penkkipunnerrus"
   ];
+
+Future<void> fetchData() async {
+  try {
+    final response = await http.get(Uri.parse('http://127.0.0.1/vbt_project/get_data.php'));
+
+    if (response.statusCode == 200) {
+      List<dynamic> data = json.decode(response.body);
+      
+      if (data.isNotEmpty) {
+        setState(() {
+          // Otetaan uusin acc_x arvo tietokannasta
+          currentVelocity = double.parse(data[0]['acc_x'].toString());
+          
+          // Lisätään piste graafiin
+          _x += 1.0;
+          _velocitySpots.add(FlSpot(_x, currentVelocity));
+
+          // Pidetään graafi siistinä (viimeiset 50 pistettä)
+          if (_velocitySpots.length > 50) {
+            _velocitySpots.removeAt(0);
+          }
+        });
+      }
+    }
+  } catch (e) {
+    debugPrint('Haku epäonnistui: $e');
+  }
+}
+
 
   double currentVelocity = 0.0; 
 
