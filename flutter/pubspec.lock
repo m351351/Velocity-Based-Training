@@ -176,6 +176,7 @@ packages:
     description: flutter
     source: sdk
     version: "0.0.0"
+<<<<<<< HEAD
   http:
     dependency: "direct main"
     description:
@@ -192,6 +193,8 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.1.2"
+=======
+>>>>>>> flutter
   leak_tracker:
     dependency: transitive
     description:
@@ -325,6 +328,7 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.7.10"
+<<<<<<< HEAD
   typed_data:
     dependency: transitive
     description:
@@ -333,6 +337,8 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.4.0"
+=======
+>>>>>>> flutter
   vector_math:
     dependency: transitive
     description:
