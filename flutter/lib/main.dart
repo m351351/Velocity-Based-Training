@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-
+import 'dart:async';
+// Bluetooth-kirjasto, otetaan käyttöön myöhemmin
+import 'dart:math';
+import 'package:fl_chart/fl_chart.dart';
 void main() {
   runApp(const VBTApp());
 }
@@ -28,6 +30,39 @@ class VBTPage extends StatefulWidget {
 // TÄÄLLÄ ALOITUSNÄKYMÄÄN TULEVAT TEKSTIT -meri 190326
 
 class _VBTPageState extends State<VBTPage> {
+
+  final List<FlSpot> _velocitySpots = []; // Graafipisteet kiihtyvyysdatasta
+  double _x = 0.0; // ajan kulumista simuloiva muuttuja graafia varten
+
+// Tässä mock-datalla simuloidaan kiihtyvyysanturin dataa
+  @override
+  void initState() {
+    super.initState();
+
+    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      setState(() {
+        _t += 0.1; // Simuloidaan ajan kulumista
+        _x += 1.0;
+        _velocitySpots.add(FlSpot(_x, currentVelocity));
+        
+        if (_velocitySpots.length > 100) {
+          _velocitySpots.removeAt(0); // graafin skaalaus viimeiseen 100 pisteesee 
+        } // uusi datapiste graafiin
+        // perusmuoto: siniaalto ja pieni satunnaisuus
+        final base = 0.9 + 0.6 * sin(_t); // simuloidaan nosto ja laskuvaihetta
+        final noise = (_random.nextDouble() - 0.5) * 0.08; // satunnaista kohinaa
+
+        // Ei anneta nopeuden mennä negatiiviseksi tässä mock-datassa
+        currentVelocity = max(0.0, base + noise);
+            });
+  });
+}
+@override
+void dispose() {
+  _timer?.cancel();
+  super.dispose();
+
+}
   // Tänne tulee myöhemmin kiihtyvyysanturin data [cite: 25, 76]
 
 /* //TÄMÄ PÄÄLLE KUN HALUTAAN KÄYTTÄÄ KÄYTTÖLIITTYMÄÄ PUHELIMELLA, POIS PÄÄLTÄ JOS KEHITYS KONEELLA -meri 190326
@@ -56,11 +91,15 @@ class _VBTPageState extends State<VBTPage> {
 
   double currentVelocity = 0.0; 
 
+  Timer? _timer;
+  double _t = 0.0; // simulointia varten "aika"
+  final Random _random = Random();
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Velocity Based Trainig'),
+        title: const Text('Velocity Based Training'),
       ),
       body: Column(
         children: [
@@ -69,7 +108,32 @@ class _VBTPageState extends State<VBTPage> {
             height: 300,
             margin: const EdgeInsets.all(16),
             color: Colors.grey[900],
-            child: const Center(child: Text('Tähän tulee kiihtyvyysgraafi')),
+            child: Padding(
+  padding: const EdgeInsets.all(12.0),
+  child: LineChart(
+    LineChartData(
+      minY: 0,
+      maxY: 2.0,
+      gridData: const FlGridData(show: true),
+      titlesData: const FlTitlesData(
+        leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true)),
+        bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+        rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      ),
+      borderData: FlBorderData(show: true),
+      lineBarsData: [
+        LineChartBarData(
+          spots: _velocitySpots,
+          isCurved: true,
+          color: Colors.greenAccent,
+          barWidth: 3,
+          dotData: const FlDotData(show: false),
+        ),
+      ],
+    ),
+  ),
+),
           ),
           
           // 2. Reaaliaikainen lukema 
@@ -86,7 +150,7 @@ class _VBTPageState extends State<VBTPage> {
               style: TextStyle(color: Colors.greenAccent, fontSize: 18),
             ),
           ),
-
+/*
           // 4. Testipainike simulointiin
           ElevatedButton(
             onPressed: () {
@@ -96,7 +160,7 @@ class _VBTPageState extends State<VBTPage> {
             },
             child: const Text('Simuloi nosto'),
           ),
-
+*/
 // TÄSSÄ NAPPULAT LIIKKEIDEN VALINTAAN -meri 190326
           Padding(
             padding: EdgeInsets.all(8.0),
