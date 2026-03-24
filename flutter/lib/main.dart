@@ -34,9 +34,18 @@ class _VBTPageState extends State<VBTPage> {
   final List<double> _setVelocities = []; // tallennetaan jokaisen sarjan nopeudet analyysiä varten
   double peakVelocity = 0.0; // tallennetaan sarjan huippunopeus analyysiä varten
   double meanVelocity = 0.0; // tallennetaan sarjan keskimääräinen nopeus analyysiä varten
-
   final List<FlSpot> _velocitySpots = []; // Graafipisteet kiihtyvyysdatasta
   double _x = 0.0; // ajan kulumista simuloiva muuttuja graafia varten
+  
+  String get analysisText {
+  if (isRecording) return 'Analyysi: Sarja käynnissä...';
+  if (_setVelocities.isEmpty) return 'Analyysi: Odota suoritusta...';
+
+  if (meanVelocity >= 1.3) return 'Analyysi: Nopeusvoima-alue (kevyt kuorma)';
+  if (meanVelocity >= 0.9) return 'Analyysi: Voima-nopeusalue (keskikuorma)';
+  if (meanVelocity >= 0.6) return 'Analyysi: Maksimivoima-alue (raskas kuorma)';
+  return 'Analyysi: Hyvin raskas / väsymys, tarkista tekniikka';
+}
 
   String valittuLiike = "ei valittu";
   final List<String> liikkeet = [
@@ -49,8 +58,7 @@ class _VBTPageState extends State<VBTPage> {
   ];
 
   double currentVelocity = 0.0;
-
-  Timer? _timer;
+   Timer? _timer;
   double _t = 0.0; // simulointia varten "aika"
   final Random _random = Random();
 
@@ -189,13 +197,13 @@ class _VBTPageState extends State<VBTPage> {
           ),
 
           // 3. VBT-analyysi (esim. voimaa kehittävä) [cite: 35, 36]
-          const Padding(
-            padding: EdgeInsets.all(20.0),
-            child: Text(
-              'Analyysi: Odota suoritusta...',
-              style: TextStyle(color: Colors.greenAccent, fontSize: 18),
-            ),
-          ),
+Padding(
+  padding: const EdgeInsets.all(20.0),
+  child: Text(
+    analysisText,
+    style: const TextStyle(color: Colors.greenAccent, fontSize: 18),
+  ),
+),
 
           // 4. Setin hallinta
           Row(
