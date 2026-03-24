@@ -44,6 +44,9 @@ class _VBTPageState extends State<VBTPage> {
   BluetoothCharacteristic? _velocityChar;
   StreamSubscription<List<int>>? _bleSub;
 
+  // löydetyt BLE-laitteet käyttäjän valintaa varten
+  List<ScanResult> _scanResults = [];
+
   final List<FlSpot> _velocitySpots = []; // Graafipisteet kiihtyvyysdatasta
   double _x = 0.0; // ajan kulumista simuloiva muuttuja graafia varten
 
@@ -86,7 +89,7 @@ class _VBTPageState extends State<VBTPage> {
           final noise = (_random.nextDouble() - 0.5) * 0.08;
           currentVelocity = max(0.0, base + noise);
         } else {
-          // BLE-data tulee notify-streamistä _connectBle()-metodissa
+          // BLE-data tulee notify-streamistä _connectToDevice()-metodissa
           // pidetään currentVelocity ennallaan tässä loopissa
         }
 
@@ -151,24 +154,79 @@ class _VBTPageState extends State<VBTPage> {
   }
 */
 
-  Future<void> _connectBle() async {
+  Future<void> _scanBleDevices() async {
     setState(() {
       connectionStatus = 'BLE: skannataan...';
+      _scanResults = [];
     });
 
     try {
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
       final results = await FlutterBluePlus.scanResults.first;
+      await FlutterBluePlus.stopScan();
 
-      if (results.isEmpty) {
-        setState(() => connectionStatus = 'BLE: laitetta ei löytynyt');
-        return;
+      setState(() {
+        _scanResults = results
+            .where((r) => r.device.platformName.trim().isNotEmpty)
+            .toList();
+
+        connectionStatus = _scanResults.isEmpty
+            ? 'BLE: ei laitteita'
+            : 'BLE: valitse laite (${_scanResults.length})';
+      });
+
+      if (_scanResults.isNotEmpty && mounted) {
+        await _showDevicePicker();
+      }
+    } catch (e) {
+      await FlutterBluePlus.stopScan();
+      setState(() => connectionStatus = 'BLE-virhe: $e');
+    }
+  }
+
+  Future<void> _showDevicePicker() async {
+    await showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _scanResults.length,
+            itemBuilder: (context, index) {
+              final r = _scanResults[index];
+              final name = r.device.platformName.trim().isEmpty
+                  ? '(nimetön laite)'
+                  : r.device.platformName;
+              return ListTile(
+                title: Text(name),
+                subtitle: Text(r.device.remoteId.str),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await _connectToDevice(r.device);
+                },
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _connectToDevice(BluetoothDevice device) async {
+    setState(() => connectionStatus = 'BLE: yhdistetään ${device.platformName}...');
+
+    try {
+      // varmuuden vuoksi vanha yhteys pois
+      await _bleSub?.cancel();
+      _bleSub = null;
+
+      if (_device != null) {
+        try {
+          await _device!.disconnect();
+        } catch (_) {}
       }
 
-      // TODO: suodata nimellä / service UUID:lla kun tiedätte oikean laitteen
-      _device = results.first.device;
-
-      await FlutterBluePlus.stopScan();
+      _device = device;
       await _device!.connect(timeout: const Duration(seconds: 8));
 
       final services = await _device!.discoverServices();
@@ -191,23 +249,23 @@ class _VBTPageState extends State<VBTPage> {
       }
 
       await _velocityChar!.setNotifyValue(true);
-      await _bleSub?.cancel();
       _bleSub = _velocityChar!.lastValueStream.listen((data) {
         // Odotetaan tässä vaiheessa ASCII-muotoa, esim "1.23"
         final raw = utf8.decode(data, allowMalformed: true).trim();
         final parsed = double.tryParse(raw);
 
-        if (parsed != null) {
+        if (parsed != null && mounted) {
           setState(() {
             currentVelocity = parsed;
-            connectionStatus = 'BLE: yhdistetty';
+            connectionStatus = 'BLE: yhdistetty (${_device?.platformName ?? "laite"})';
           });
         }
       });
 
-      setState(() => connectionStatus = 'BLE: yhdistetty');
+      setState(() {
+        connectionStatus = 'BLE: yhdistetty (${_device?.platformName ?? "laite"})';
+      });
     } catch (e) {
-      await FlutterBluePlus.stopScan();
       setState(() => connectionStatus = 'BLE-virhe: $e');
     }
   }
@@ -336,9 +394,7 @@ class _VBTPageState extends State<VBTPage> {
               onChanged: (value) {
                 setState(() {
                   useMockData = value;
-                  connectionStatus = value
-                      ? 'Mock data käytössä'
-                      : 'BLE: ei yhdistetty';
+                  connectionStatus = value ? 'Mock data käytössä' : 'BLE: ei yhdistetty';
                 });
               },
             ),
@@ -351,8 +407,8 @@ class _VBTPageState extends State<VBTPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 ElevatedButton(
-                  onPressed: useMockData ? null : _connectBle,
-                  child: const Text('Connect BLE'),
+                  onPressed: useMockData ? null : _scanBleDevices,
+                  child: const Text('Scan BLE'),
                 ),
                 const SizedBox(width: 10),
                 ElevatedButton(
