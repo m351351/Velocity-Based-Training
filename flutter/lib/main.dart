@@ -1,5 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+
+
+Future<void> fetchData() async {
+  // HUOM: Käytä tietokoneesi IP-osoitetta (esim. 192.168.x.x) localhostin sijaan, 
+  // jos testaat oikealla puhelimella/emulaattorilla!
+  final response = await http.get(Uri.parse('http://10.4.0.221/vbt_project/get_data.php'));
+
+  if (response.statusCode == 200) {
+    List<dynamic> data = json.decode(response.body);
+    print(data); // Tässä näet kiihtyvyysanturin lukemat Flutter-konsolissa!
+  } else {
+    print('Haku epäonnistui');
+  }
+}
 
 void main() {
   runApp(const VBTApp());
@@ -28,6 +44,13 @@ class VBTPage extends StatefulWidget {
 // TÄÄLLÄ ALOITUSNÄKYMÄÄN TULEVAT TEKSTIT -meri 190326
 
 class _VBTPageState extends State<VBTPage> {
+@override
+void initState(){
+  super.initState();
+    debugPrint('Aloitusnäkymä tuodaan näkyviin');
+}
+
+
   // Tänne tulee myöhemmin kiihtyvyysanturin data [cite: 25, 76]
 
 /* //TÄMÄ PÄÄLLE KUN HALUTAAN KÄYTTÄÄ KÄYTTÖLIITTYMÄÄ PUHELIMELLA, POIS PÄÄLTÄ JOS KEHITYS KONEELLA -meri 190326
@@ -60,7 +83,7 @@ class _VBTPageState extends State<VBTPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Velocity Based Trainig'),
+        title: const Text('Velocity Based Training'),
       ),
       body: Column(
         children: [
@@ -91,7 +114,10 @@ class _VBTPageState extends State<VBTPage> {
           ElevatedButton(
             onPressed: () {
               setState(() {
+
+                debugPrint('Simulointinappia painettu');
                 currentVelocity = 1.25; // Simuloitu nosto [cite: 66]
+
               });
             },
             child: const Text('Simuloi nosto'),
@@ -110,6 +136,7 @@ class _VBTPageState extends State<VBTPage> {
               return ElevatedButton(
                 onPressed: (){
                   setState(() {
+                    debugPrint("Painettu valittua liikettä");
                     valittuLiike = yksiLiike;
                   });
                 } ,
