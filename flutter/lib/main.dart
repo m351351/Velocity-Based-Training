@@ -34,6 +34,10 @@ class _VBTPageState extends State<VBTPage> {
   final List<double> _setVelocities = []; // tallennetaan jokaisen sarjan nopeudet analyysiä varten
   double peakVelocity = 0.0; // tallennetaan sarjan huippunopeus analyysiä varten
   double meanVelocity = 0.0; // tallennetaan sarjan keskimääräinen nopeus analyysiä varten
+
+  bool useMockData = true;
+String connectionStatus = 'BLE: ei yhdistetty';
+
   final List<FlSpot> _velocitySpots = []; // Graafipisteet kiihtyvyysdatasta
   double _x = 0.0; // ajan kulumista simuloiva muuttuja graafia varten
   
@@ -46,6 +50,8 @@ class _VBTPageState extends State<VBTPage> {
   if (meanVelocity >= 0.6) return 'Analyysi: Maksimivoima-alue (raskas kuorma)';
   return 'Analyysi: Hyvin raskas / väsymys, tarkista tekniikka';
 }
+
+
 
   String valittuLiike = "ei valittu";
   final List<String> liikkeet = [
@@ -67,29 +73,31 @@ class _VBTPageState extends State<VBTPage> {
   void initState() {
     super.initState();
 
-    _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
-      setState(() {
-        _t += 0.1; // Simuloidaan ajan kulumista
+_timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+  setState(() {
+    _t += 0.1; // Simuloidaan ajan kulumista
 
-        // perusmuoto: siniaalto ja pieni satunnaisuus
-        final base = 0.9 + 0.6 * sin(_t); // simuloidaan nosto ja laskuvaihetta
-        final noise = (_random.nextDouble() - 0.5) * 0.08; // satunnaista kohinaa
+    if (useMockData) {
+      final base = 0.9 + 0.6 * sin(_t);
+      final noise = (_random.nextDouble() - 0.5) * 0.08;
+      currentVelocity = max(0.0, base + noise);
+    } else {
+      // BLE-data tulee seuraavassa stepissä
+      // pidetään currentVelocity ennallaan toistaiseksi
+    }
 
-        // Ei anneta nopeuden mennä negatiiviseksi tässä mock-datassa
-        currentVelocity = max(0.0, base + noise);
+    _x += 1.0;
+    _velocitySpots.add(FlSpot(_x, currentVelocity));
 
-        _x += 1.0;
-        _velocitySpots.add(FlSpot(_x, currentVelocity));
+    if (_velocitySpots.length > 100) {
+      _velocitySpots.removeAt(0);
+    }
 
-        if (_velocitySpots.length > 100) {
-          _velocitySpots.removeAt(0); // graafin skaalaus viimeiseen 100 pisteeseen
-        }
-
-        if (isRecording) {
-          _setVelocities.add(currentVelocity);
-        }
-      });
-    });
+    if (isRecording) {
+      _setVelocities.add(currentVelocity);
+    }
+  });
+});
   }
 
   @override
@@ -151,7 +159,8 @@ class _VBTPageState extends State<VBTPage> {
       appBar: AppBar(
         title: const Text('Velocity Based Training'),
       ),
-      body: Column(
+      body: SingleChildScrollView(
+        child: Column(
         children: [
           // 1. Graafialue (tähän tulee fl_chart myöhemmin)
           Container(
@@ -241,6 +250,17 @@ Padding(
           ),
 
           const SizedBox(height: 16),
+          SwitchListTile(
+  title: const Text('Käytä mock-dataa'),
+  value: useMockData,
+  onChanged: (value) {
+    setState(() {
+      useMockData = value;
+      connectionStatus = value ? 'Mock data käytössä' : 'BLE: ei yhdistetty';
+    });
+  },
+),
+Text(connectionStatus, style: const TextStyle(color: Colors.white70)),
 
 // TÄSSÄ NAPPULAT LIIKKEIDEN VALINTAAN -meri 190326
           Padding(
@@ -266,6 +286,7 @@ Padding(
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
