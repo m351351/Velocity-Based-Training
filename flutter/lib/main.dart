@@ -21,6 +21,7 @@ class VBTApp extends StatelessWidget {
       title: 'Velocity Based Training',
       theme: ThemeData.dark(), // Tumma teema kuntosaliympäristöön [cite: 40]
       home: const VBTPage(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -40,7 +41,7 @@ class _VBTPageState extends State<VBTPage> {
   double meanVelocity = 0.0; // sarjan keskinopeus
 
   bool useMockData = true;
-  String connectionStatus = 'BLE: ei yhdistetty';
+  String connectionStatus = 'Mock data käytössä';
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _velocityChar;
@@ -79,6 +80,17 @@ class _VBTPageState extends State<VBTPage> {
   // käyttäjän asettama tavoite velocity lossille
   double targetVelocityLoss = 20.0;
 
+  // smoothing painonnostolle (poistaa neulamaista sahanterää)
+  final List<double> _smoothingBuffer = [];
+  double _smooth(double raw, {int window = 5}) {
+    _smoothingBuffer.add(raw);
+    if (_smoothingBuffer.length > window) {
+      _smoothingBuffer.removeAt(0);
+    }
+    final sum = _smoothingBuffer.fold(0.0, (a, b) => a + b);
+    return sum / _smoothingBuffer.length;
+  }
+
   // ----------------------------
   // Zone / luokittelulogiikka
   // ----------------------------
@@ -92,22 +104,12 @@ class _VBTPageState extends State<VBTPage> {
     return 'Absolute Strength';
   }
 
-  String get powerliftingZoneGoal {
-    final v = meanVelocity;
-    if (v > 1.3) return '<30% 1RM';
-    if (v >= 1.0) return '30–45% 1RM';
-    if (v >= 0.75) return '45–60% 1RM';
-    if (v >= 0.5) return '60–80% 1RM';
-    return '>80% 1RM';
-  }
-
   Color get powerliftingZoneColor {
     final v = meanVelocity;
-    if (v > 1.3) return Colors.lightBlueAccent;
-    if (v >= 1.0) return Colors.blueAccent;
-    if (v >= 0.75) return Colors.greenAccent;
-    if (v >= 0.5) return Colors.amberAccent;
-    return Colors.redAccent;
+    if (v > 1.3) return const Color(0xFF4FC3F7); // kirkas sininen
+    if (v >= 0.75) return const Color(0xFF00E676); // vihreä
+    if (v >= 0.5) return const Color(0xFFFFB300); // keltainen/oranssi
+    return const Color(0xFFFF5252); // punainen
   }
 
   // Painonnoston liikespesifiset peak-rajat
@@ -124,25 +126,13 @@ class _VBTPageState extends State<VBTPage> {
     }
   }
 
-  String get weightliftingAssessment {
-    final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
-    final v = peakVelocity;
-
-    if (v < min) return 'Alle minimin (${min.toStringAsFixed(1)} m/s)';
-    if (v <= optHigh && v >= optLow) {
-      return 'Optimaalinen (${optLow.toStringAsFixed(1)}–${optHigh.toStringAsFixed(1)} m/s)';
-    }
-    if (v > optHigh) return 'Yli optimaalisen';
-    return 'Minimin yli, mutta ei optimaalinen';
-  }
-
   Color get weightliftingColor {
     final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
     final v = peakVelocity;
-    if (v < min) return Colors.redAccent;
-    if (v >= optLow && v <= optHigh) return Colors.greenAccent;
-    if (v > optHigh) return Colors.lightBlueAccent;
-    return Colors.amberAccent;
+    if (v < min) return const Color(0xFFFF5252);
+    if (v >= optLow && v <= optHigh) return const Color(0xFF00E676);
+    if (v > optHigh) return const Color(0xFF4FC3F7);
+    return const Color(0xFFFFB300);
   }
 
   // Voimannostossa seurataan velocity lossia
@@ -154,28 +144,23 @@ class _VBTPageState extends State<VBTPage> {
     return ((best - latest) / best) * 100.0;
   }
 
-  String get velocityLossText {
-    final vl = velocityLossPercent;
-    if (vl <= 20) return '10–20%: voima/räjähtävyys';
-    if (vl <= 40) return '30–40%: hypertrofia';
-    return '>40%: failure-riski';
-  }
-
   Color get velocityLossColor {
     final vl = velocityLossPercent;
-    if (vl <= 20) return Colors.greenAccent;
-    if (vl <= 40) return Colors.amberAccent;
-    return Colors.redAccent;
+    if (vl <= 20) return const Color(0xFF00E676);
+    if (vl <= 40) return const Color(0xFFFFB300);
+    return const Color(0xFFFF5252);
   }
 
   String get analysisText {
-    if (isRecording) return 'Analyysi: Sarja käynnissä...';
-    if (_setVelocities.isEmpty) return 'Analyysi: Odota suoritusta...';
-
+    if (_setVelocities.isEmpty) return 'Odottaa sarjaa';
     if (selectedCategory == LiftCategory.powerlifting) {
-      return 'Zone: $powerliftingZone • $powerliftingZoneGoal';
+      return 'Zone: $powerliftingZone';
     } else {
-      return 'Peak-arvio: $weightliftingAssessment';
+      final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
+      if (peakVelocity < min) return 'Peak alle minimin';
+      if (peakVelocity >= optLow && peakVelocity <= optHigh) return 'Peak optimaalisella alueella';
+      if (peakVelocity > optHigh) return 'Peak yli optimaalisen';
+      return 'Peak minimin yli';
     }
   }
 
@@ -212,59 +197,48 @@ class _VBTPageState extends State<VBTPage> {
   List<HorizontalLine> get zoneLines {
     if (selectedCategory == LiftCategory.powerlifting) {
       return [
-        HorizontalLine(y: 0.5, color: Colors.redAccent.withOpacity(0.45), strokeWidth: 1),
-        HorizontalLine(y: 0.75, color: Colors.amberAccent.withOpacity(0.45), strokeWidth: 1),
-        HorizontalLine(y: 1.0, color: Colors.greenAccent.withOpacity(0.45), strokeWidth: 1),
-        HorizontalLine(y: 1.3, color: Colors.lightBlueAccent.withOpacity(0.45), strokeWidth: 1),
+        HorizontalLine(y: 0.5, color: Colors.redAccent.withOpacity(0.30), strokeWidth: 1),
+        HorizontalLine(y: 0.75, color: Colors.amberAccent.withOpacity(0.30), strokeWidth: 1),
+        HorizontalLine(y: 1.0, color: Colors.greenAccent.withOpacity(0.30), strokeWidth: 1),
       ];
     } else {
       final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
       return [
-        HorizontalLine(y: min, color: Colors.redAccent.withOpacity(0.45), strokeWidth: 1),
-        HorizontalLine(y: optLow, color: Colors.amberAccent.withOpacity(0.45), strokeWidth: 1),
-        HorizontalLine(y: optHigh, color: Colors.greenAccent.withOpacity(0.45), strokeWidth: 1),
+        HorizontalLine(y: min, color: Colors.redAccent.withOpacity(0.30), strokeWidth: 1),
+        HorizontalLine(y: optLow, color: Colors.amberAccent.withOpacity(0.30), strokeWidth: 1),
+        HorizontalLine(y: optHigh, color: Colors.greenAccent.withOpacity(0.30), strokeWidth: 1),
       ];
     }
   }
 
-  // zone-taustat graafiin
-  List<RangeAnnotations> get zoneBackgrounds {
+  List<HorizontalRangeAnnotation> get zoneBackgroundRanges {
     if (selectedCategory == LiftCategory.powerlifting) {
       return [
-        RangeAnnotations(horizontalRangeAnnotations: [
-          HorizontalRangeAnnotation(y1: 0.0, y2: 0.5, color: Colors.red.withOpacity(0.06)),
-          HorizontalRangeAnnotation(y1: 0.5, y2: 0.75, color: Colors.amber.withOpacity(0.06)),
-          HorizontalRangeAnnotation(y1: 0.75, y2: 1.0, color: Colors.green.withOpacity(0.06)),
-          HorizontalRangeAnnotation(y1: 1.0, y2: 1.3, color: Colors.blue.withOpacity(0.06)),
-          HorizontalRangeAnnotation(y1: 1.3, y2: 1.5, color: Colors.lightBlue.withOpacity(0.06)),
-        ])
+        HorizontalRangeAnnotation(y1: 0.0, y2: 0.5, color: const Color(0x22FF5252)),
+        HorizontalRangeAnnotation(y1: 0.5, y2: 0.75, color: const Color(0x22FFB300)),
+        HorizontalRangeAnnotation(y1: 0.75, y2: 1.0, color: const Color(0x2200E676)),
+        HorizontalRangeAnnotation(y1: 1.0, y2: 1.5, color: const Color(0x224FC3F7)),
       ];
     } else {
       final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
       return [
-        RangeAnnotations(horizontalRangeAnnotations: [
-          HorizontalRangeAnnotation(y1: 0.0, y2: min, color: Colors.red.withOpacity(0.05)),
-          HorizontalRangeAnnotation(y1: min, y2: optLow, color: Colors.amber.withOpacity(0.05)),
-          HorizontalRangeAnnotation(y1: optLow, y2: optHigh, color: Colors.green.withOpacity(0.05)),
-          HorizontalRangeAnnotation(y1: optHigh, y2: 2.6, color: Colors.blue.withOpacity(0.05)),
-        ])
+        HorizontalRangeAnnotation(y1: 0.0, y2: min, color: const Color(0x22FF5252)),
+        HorizontalRangeAnnotation(y1: min, y2: optLow, color: const Color(0x22FFB300)),
+        HorizontalRangeAnnotation(y1: optLow, y2: optHigh, color: const Color(0x2200E676)),
+        HorizontalRangeAnnotation(y1: optHigh, y2: 2.6, color: const Color(0x224FC3F7)),
       ];
     }
   }
 
   double get heroValue => selectedCategory == LiftCategory.powerlifting ? meanVelocity : peakVelocity;
-
   Color get heroColor => selectedCategory == LiftCategory.powerlifting ? powerliftingZoneColor : weightliftingColor;
-
   String get heroLabel => selectedCategory == LiftCategory.powerlifting ? 'Mean Velocity' : 'Peak Velocity';
 
   // mittaripalkki 0..1
   double get zoneGaugeValue {
     if (selectedCategory == LiftCategory.powerlifting) {
-      // 0..1.5 skaalalle
       return (meanVelocity / 1.5).clamp(0.0, 1.0);
     } else {
-      // painonnosto 0..2.6
       return (peakVelocity / 2.6).clamp(0.0, 1.0);
     }
   }
@@ -290,33 +264,23 @@ class _VBTPageState extends State<VBTPage> {
             // Painonnosto: "The Double Peak"
             final phase = (_t % 1.2); // lyhyt sykli
             double v = 0.08;
-
-            // 1st pull
-            v += 0.9 * exp(-pow((phase - 0.28) / 0.11, 2).toDouble());
-            // transition dip
-            v -= 0.25 * exp(-pow((phase - 0.46) / 0.07, 2).toDouble());
-            // 2nd pull (isompi piikki)
-            v += 1.7 * exp(-pow((phase - 0.63) / 0.09, 2).toDouble());
-
+            v += 0.9 * exp(-pow((phase - 0.28) / 0.11, 2).toDouble()); // 1st pull
+            v -= 0.25 * exp(-pow((phase - 0.46) / 0.07, 2).toDouble()); // transition
+            v += 1.7 * exp(-pow((phase - 0.63) / 0.09, 2).toDouble()); // 2nd pull
             final noise = (_random.nextDouble() - 0.5) * 0.04;
-            currentVelocity = max(0.0, v + noise);
+            currentVelocity = max(0.0, _smooth(v + noise)); // smoothing vain painonnostolle
           }
-        } else {
-          // BLE-data tulee notify-streamistä _connectToDevice()-metodissa
-          // pidetään currentVelocity ennallaan tässä loopissa
         }
 
-        _x += 1.0;
-        _velocitySpots.add(FlSpot(_x, currentVelocity));
-
-        if (_velocitySpots.length > 140) {
-          _velocitySpots.removeAt(0); // graafin skaalaus viimeisiin pisteisiin
-        }
-
+        // GATING: graafiin lisätään pisteitä vain kun setti käy
         if (isRecording) {
-          _setVelocities.add(currentVelocity);
+          _x += 1.0;
+          _velocitySpots.add(FlSpot(_x, currentVelocity));
+          if (_velocitySpots.length > 120) {
+            _velocitySpots.removeAt(0); // graafin skaalaus viimeisiin pisteisiin
+          }
 
-          // reaaliaikainen sarjalaskenta (jotta päänumero elää)
+          _setVelocities.add(currentVelocity);
           peakVelocity = _setVelocities.reduce((a, b) => a > b ? a : b);
           meanVelocity = _setVelocities.reduce((a, b) => a + b) / _setVelocities.length;
         }
@@ -327,7 +291,13 @@ class _VBTPageState extends State<VBTPage> {
   void _startSet() {
     setState(() {
       isRecording = true;
+
+      // START tyhjentää sarjan datan + graafin, ettei vanha kohina kummittele
       _setVelocities.clear();
+      _velocitySpots.clear();
+      _x = 0.0;
+      _smoothingBuffer.clear();
+
       peakVelocity = 0.0;
       meanVelocity = 0.0;
     });
@@ -336,7 +306,7 @@ class _VBTPageState extends State<VBTPage> {
   void _stopSet() {
     setState(() {
       isRecording = false;
-
+      // STOP jättää viimeisen sarjan graafin näkyviin analyysiä varten
       if (_setVelocities.isNotEmpty) {
         peakVelocity = _setVelocities.reduce((a, b) => a > b ? a : b);
         meanVelocity = _setVelocities.reduce((a, b) => a + b) / _setVelocities.length;
@@ -350,6 +320,9 @@ class _VBTPageState extends State<VBTPage> {
       _setVelocities.clear();
       peakVelocity = 0.0;
       meanVelocity = 0.0;
+      _velocitySpots.clear();
+      _x = 0.0;
+      _smoothingBuffer.clear();
     });
   }
 
@@ -383,10 +356,7 @@ class _VBTPageState extends State<VBTPage> {
 
       setState(() {
         _scanResults = results.where((r) => r.device.platformName.trim().isNotEmpty).toList();
-
-        connectionStatus = _scanResults.isEmpty
-            ? 'BLE: ei laitteita'
-            : 'BLE: valitse laite (${_scanResults.length})';
+        connectionStatus = _scanResults.isEmpty ? 'BLE: ei laitteita' : 'BLE: valitse laite (${_scanResults.length})';
       });
 
       if (_scanResults.isNotEmpty && mounted) {
@@ -470,8 +440,16 @@ class _VBTPageState extends State<VBTPage> {
             currentVelocity = parsed;
             connectionStatus = 'BLE: yhdistetty (${_device?.platformName ?? "laite"})';
 
+            // GATING myös BLE:lle: piirretään vain setin aikana
             if (isRecording) {
-              _setVelocities.add(currentVelocity);
+              _x += 1.0;
+              final v = selectedCategory == LiftCategory.weightlifting ? _smooth(currentVelocity) : currentVelocity;
+              _velocitySpots.add(FlSpot(_x, v));
+              if (_velocitySpots.length > 120) {
+                _velocitySpots.removeAt(0);
+              }
+
+              _setVelocities.add(v);
               peakVelocity = _setVelocities.reduce((a, b) => a > b ? a : b);
               meanVelocity = _setVelocities.reduce((a, b) => a + b) / _setVelocities.length;
             }
@@ -508,336 +486,388 @@ class _VBTPageState extends State<VBTPage> {
     super.dispose();
   }
 
+  Future<void> _pickLift() async {
+    final items = visibleLiikkeet;
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            children: items.map((liike) {
+              final selected = liike == valittuLiike;
+              return ListTile(
+                title: Text(liike),
+                trailing: selected ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, liike),
+              );
+            }).toList(),
+          ),
+        );
+      },
+    );
+
+    if (chosen != null) {
+      setState(() {
+        valittuLiike = chosen;
+        _velocitySpots.clear();
+        _x = 0.0;
+        _smoothingBuffer.clear();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isPowerlifting = selectedCategory == LiftCategory.powerlifting;
     final FlSpot? stickSpot = stickingPointSpot;
     final FlSpot? pSpot = peakSpot;
+    final List<FlSpot> safeSpots = _velocitySpots.isEmpty ? const [FlSpot(0, 0)] : _velocitySpots;
+
+    final bool lossOverLimit = velocityLossPercent > targetVelocityLoss;
+    final Color lineColor = isPowerlifting ? Colors.cyanAccent : Colors.white;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Velocity Based Training'),
-      ),
-      body: SingleChildScrollView(
-        child: Column(
-          children: [
-            // Lajivalinta
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-              child: SegmentedButton<LiftCategory>(
-                segments: const [
-                  ButtonSegment(
-                    value: LiftCategory.powerlifting,
-                    label: Text('Voimannosto'),
-                    icon: Icon(Icons.fitness_center),
-                  ),
-                  ButtonSegment(
-                    value: LiftCategory.weightlifting,
-                    label: Text('Painonnosto'),
-                    icon: Icon(Icons.bolt),
-                  ),
-                ],
-                selected: {selectedCategory},
-                onSelectionChanged: (newSelection) {
-                  setState(() {
-                    selectedCategory = newSelection.first;
-                    valittuLiike = visibleLiikkeet.first;
-                    _velocitySpots.clear();
-                    _x = 0.0;
-                    _setVelocities.clear();
-                    peakVelocity = 0.0;
-                    meanVelocity = 0.0;
-                  });
-                },
-              ),
-            ),
-
-            // TÄSSÄ NAPPULAT LIIKKEIDEN VALINTAAN -meri 190326
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Text(
-                "valittu liike: $valittuLiike",
-                style: const TextStyle(fontSize: 20, color: Colors.blueAccent),
-              ),
-            ),
-
-            Wrap(
-              spacing: 8.0,
-              children: visibleLiikkeet.map((yksiLiike) {
-                final selected = valittuLiike == yksiLiike;
-                return ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: selected
-                        ? (isPowerlifting ? Colors.lightBlue : Colors.green)
-                        : null,
-                  ),
-                  onPressed: () {
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              heroColor.withOpacity(0.18),
+              Colors.black,
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              // A) Yläosa: lajitabit
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                child: SegmentedButton<LiftCategory>(
+                  segments: const [
+                    ButtonSegment(
+                      value: LiftCategory.powerlifting,
+                      label: Text('VOIMA'),
+                    ),
+                    ButtonSegment(
+                      value: LiftCategory.weightlifting,
+                      label: Text('PAINO'),
+                    ),
+                  ],
+                  selected: {selectedCategory},
+                  onSelectionChanged: (newSelection) {
                     setState(() {
-                      valittuLiike = yksiLiike;
+                      selectedCategory = newSelection.first;
+                      valittuLiike = visibleLiikkeet.first;
                       _velocitySpots.clear();
                       _x = 0.0;
+                      _setVelocities.clear();
+                      _smoothingBuffer.clear();
+                      peakVelocity = 0.0;
+                      meanVelocity = 0.0;
                     });
                   },
-                  child: Text(yksiLiike),
-                );
-              }).toList(),
-            ),
-
-            // SANKARINUMERO + gauge
-            const SizedBox(height: 8),
-            Text(
-              heroLabel,
-              style: const TextStyle(fontSize: 14, color: Colors.white70),
-            ),
-            Text(
-              heroValue.toStringAsFixed(2),
-              style: TextStyle(
-                fontSize: 64,
-                fontWeight: FontWeight.w900,
-                color: heroColor,
-                height: 1.0,
+                ),
               ),
-            ),
-            const Text(
-              'm/s',
-              style: TextStyle(fontSize: 18, color: Colors.white70),
-            ),
-            const SizedBox(height: 10),
 
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    isPowerlifting ? 'ZONE: $powerliftingZone' : 'PEAK STATUS',
-                    style: const TextStyle(fontSize: 13, color: Colors.white70),
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(
-                      minHeight: 14,
-                      value: zoneGaugeValue,
-                      backgroundColor: Colors.white12,
-                      valueColor: AlwaysStoppedAnimation<Color>(heroColor),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 10),
-
-            // 1. Graafialue
-            Container(
-              height: 320,
-              margin: const EdgeInsets.all(16),
-              color: Colors.grey[900],
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: LineChart(
-                  LineChartData(
-                    minY: 0,
-                    maxY: isPowerlifting ? 1.5 : 2.6,
-                    gridData: FlGridData(
-                      show: true,
-                      drawHorizontalLine: true,
-                      horizontalInterval: isPowerlifting ? 0.25 : 0.5, // estää label-ruuhkaa
-                      drawVerticalLine: false,
-                    ),
-                    extraLinesData: ExtraLinesData(horizontalLines: zoneLines),
-                    rangeAnnotations: zoneBackgrounds.first,
-                    titlesData: FlTitlesData(
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 34,
-                          interval: isPowerlifting ? 0.25 : 0.5,
-                        ),
+              // Liikevalinta tekstinä + modal
+              InkWell(
+                onTap: _pickLift,
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        valittuLiike,
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
                       ),
-                      bottomTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      topTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                      rightTitles: const AxisTitles(
-                        sideTitles: SideTitles(showTitles: false),
-                      ),
-                    ),
-                    borderData: FlBorderData(show: true),
-                    lineTouchData: LineTouchData(
-                      enabled: true,
-                      handleBuiltInTouches: true,
-                    ),
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: _velocitySpots,
-                        isCurved: isPowerlifting, // grind vs piikki
-                        curveSmoothness: isPowerlifting ? 0.25 : 0.0,
-                        color: isPowerlifting ? Colors.lightBlueAccent : Colors.greenAccent,
-                        barWidth: isPowerlifting ? 4 : 3,
-                        dotData: FlDotData(show: false),
-                        belowBarData: BarAreaData(
-                          show: _velocitySpots.length >= 2,
-                          color: (isPowerlifting ? Colors.blue : Colors.green).withOpacity(0.10),
-                        ),
-                      ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.expand_more),
                     ],
                   ),
                 ),
               ),
-            ),
 
-            // Markerit graafin tulkintaa varten
-            if (isPowerlifting && stickSpot != null)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.trip_origin, size: 12, color: Colors.amberAccent),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Sticking point: ${stickSpot.y.toStringAsFixed(2)} m/s',
-                    style: const TextStyle(color: Colors.amberAccent),
-                  ),
-                ],
+              const SizedBox(height: 6),
+
+              // B) Keskiosa: sankarinumero
+              Text(
+                heroLabel,
+                style: const TextStyle(fontSize: 14, color: Colors.white70),
               ),
-            if (!isPowerlifting && pSpot != null)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.trip_origin, size: 12, color: Colors.greenAccent),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Peak marker: ${pSpot.y.toStringAsFixed(2)} m/s',
-                    style: const TextStyle(color: Colors.greenAccent),
-                  ),
-                ],
-              ),
-
-            const SizedBox(height: 8),
-
-            // analyysiteksti
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14.0),
-              child: Text(
-                analysisText,
-                textAlign: TextAlign.center,
+              Text(
+                heroValue.toStringAsFixed(2),
                 style: TextStyle(
+                  fontSize: 92,
+                  fontWeight: FontWeight.w900,
                   color: heroColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
+                  height: 0.95,
                 ),
               ),
-            ),
+              const Text(
+                'm/s',
+                style: TextStyle(fontSize: 18, color: Colors.white70),
+              ),
 
-            const SizedBox(height: 12),
+              const SizedBox(height: 8),
 
-            // Velocity loss palkki
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Velocity Loss: ${velocityLossPercent.toStringAsFixed(1)}%  (tavoite ${targetVelocityLoss.toStringAsFixed(0)}%)',
-                    style: TextStyle(color: velocityLossColor),
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: LinearProgressIndicator(
-                      minHeight: 12,
-                      value: (velocityLossPercent / targetVelocityLoss).clamp(0.0, 1.0),
-                      backgroundColor: Colors.white12,
-                      valueColor: AlwaysStoppedAnimation<Color>(velocityLossColor),
+              // Zone/gauge
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      isPowerlifting ? 'ZONE: $powerliftingZone' : analysisText,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 14, color: Colors.white70),
+                    ),
+                    const SizedBox(height: 8),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: LinearProgressIndicator(
+                        minHeight: 14,
+                        value: zoneGaugeValue,
+                        backgroundColor: Colors.white12,
+                        valueColor: AlwaysStoppedAnimation<Color>(heroColor),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              // C) Alaosa: matalampi graafi
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: LineChart(
+                    LineChartData(
+                      minY: 0,
+                      maxY: isPowerlifting ? 1.5 : 2.6,
+                      gridData: const FlGridData(show: false),
+                      extraLinesData: ExtraLinesData(horizontalLines: zoneLines),
+                      rangeAnnotations: RangeAnnotations(
+                        horizontalRangeAnnotations: zoneBackgroundRanges,
+                      ),
+                      titlesData: FlTitlesData(
+                        leftTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                            showTitles: true,
+                            reservedSize: 30,
+                            interval: isPowerlifting ? 0.5 : 1.0,
+                            getTitlesWidget: (value, meta) {
+                              return Text(
+                                value.toStringAsFixed(1),
+                                style: const TextStyle(fontSize: 10, color: Colors.white70),
+                              );
+                            },
+                          ),
+                        ),
+                        bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      ),
+                      borderData: FlBorderData(show: false),
+                      lineBarsData: [
+                        LineChartBarData(
+                          spots: safeSpots,
+                          isCurved: true, // pehmennetty viiva
+                          curveSmoothness: 0.28,
+                          color: lineColor,
+                          barWidth: 4,
+                          dotData: FlDotData(
+                            show: true,
+                            checkToShowDot: (spot, barData) {
+                              if (isPowerlifting && stickSpot != null) {
+                                return spot.x == stickSpot.x && spot.y == stickSpot.y;
+                              }
+                              if (!isPowerlifting && pSpot != null) {
+                                return spot.x == pSpot.x && spot.y == pSpot.y;
+                              }
+                              return false;
+                            },
+                            getDotPainter: (spot, percent, bar, index) {
+                              final bool isStick =
+                                  isPowerlifting && stickSpot != null && spot.x == stickSpot.x && spot.y == stickSpot.y;
+                              return FlDotCirclePainter(
+                                radius: 5,
+                                color: isStick ? Colors.redAccent : Colors.white,
+                                strokeColor: Colors.black,
+                                strokeWidth: 1.5,
+                              );
+                            },
+                          ),
+                          belowBarData: BarAreaData(
+                            show: safeSpots.length >= 2,
+                            color: lineColor.withOpacity(0.08),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    velocityLossText,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // YKSI ISO START/STOP NAPPI
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              child: SizedBox(
-                width: double.infinity,
-                height: 64,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isRecording ? Colors.redAccent : Colors.green,
-                    textStyle: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                  ),
-                  onPressed: () {
-                    if (isRecording) {
-                      _stopSet();
-                    } else {
-                      _startSet();
-                    }
-                  },
-                  icon: Icon(isRecording ? Icons.stop : Icons.play_arrow),
-                  label: Text(isRecording ? 'STOP SET' : 'START SET'),
                 ),
               ),
-            ),
 
-            const SizedBox(height: 10),
-
-            // reset erikseen
-            ElevatedButton(
-              onPressed: _resetSet,
-              child: const Text('Reset'),
-            ),
-
-            const SizedBox(height: 16),
-
-            // reaaliaikainen lukema näkyy vielä erikseenkin
-            Text(
-              'Nopeus nyt: ${currentVelocity.toStringAsFixed(2)} m/s',
-              style: const TextStyle(fontSize: 18, color: Colors.white70),
-            ),
-
-            const SizedBox(height: 16),
-            SwitchListTile(
-              title: const Text('Käytä mock-dataa'),
-              value: useMockData,
-              onChanged: (value) {
-                setState(() {
-                  useMockData = value;
-                  connectionStatus = value ? 'Mock data käytössä' : 'BLE: ei yhdistetty';
-                });
-              },
-            ),
-            Text(
-              connectionStatus,
-              style: const TextStyle(color: Colors.white70),
-            ),
-
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                ElevatedButton(
-                  onPressed: useMockData ? null : _scanBleDevices,
-                  child: const Text('Scan BLE'),
+              if (isPowerlifting && stickSpot != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    'Sticking point: ${stickSpot.y.toStringAsFixed(2)} m/s',
+                    style: const TextStyle(color: Colors.amberAccent, fontSize: 13),
+                  ),
                 ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: useMockData ? null : _disconnectBle,
-                  child: const Text('Disconnect'),
+              if (!isPowerlifting && pSpot != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Text(
+                    'Peak point: ${pSpot.y.toStringAsFixed(2)} m/s',
+                    style: const TextStyle(color: Colors.cyanAccent, fontSize: 13),
+                  ),
                 ),
-              ],
-            ),
 
-            const SizedBox(height: 20),
-          ],
+              // Loss-rivi
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Loss: ${velocityLossPercent.toStringAsFixed(1)}%',
+                        style: TextStyle(color: velocityLossColor, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween<double>(begin: 0.6, end: lossOverLimit ? 1.0 : 0.85),
+                        duration: const Duration(milliseconds: 550),
+                        curve: Curves.easeInOut,
+                        builder: (context, opacity, child) {
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 250),
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: lossOverLimit
+                                  ? Colors.red.withOpacity(0.15 * opacity)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: child,
+                          );
+                        },
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: LinearProgressIndicator(
+                            minHeight: 10,
+                            value: (velocityLossPercent / targetVelocityLoss).clamp(0.0, 1.0),
+                            backgroundColor: Colors.white12,
+                            valueColor: AlwaysStoppedAnimation<Color>(velocityLossColor),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Kevyt BLE-paneeli (minimal mutta käytännöllinen)
+              Container(
+                margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.06),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.bluetooth, size: 18, color: Colors.white70),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            connectionStatus,
+                            style: const TextStyle(fontSize: 12, color: Colors.white70),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Row(
+                          children: [
+                            const Text('Mock', style: TextStyle(fontSize: 12)),
+                            Switch(
+                              value: useMockData,
+                              onChanged: (value) {
+                                setState(() {
+                                  useMockData = value;
+                                  if (value) {
+                                    connectionStatus = 'Mock data käytössä';
+                                  } else {
+                                    connectionStatus = 'BLE: ei yhdistetty';
+                                  }
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    if (!useMockData)
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _scanBleDevices,
+                              child: const Text('Scan'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _disconnectBle,
+                              child: const Text('Disconnect'),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+
+              // Jättinappi alareunaan
+              SafeArea(
+                top: false,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 64,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: isRecording ? Colors.redAccent : Colors.green,
+                      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                    ),
+                    onPressed: () {
+                      if (isRecording) {
+                        _stopSet();
+                      } else {
+                        _startSet();
+                      }
+                    },
+                    child: Text(
+                      isRecording ? 'STOP SET' : 'START SET',
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
