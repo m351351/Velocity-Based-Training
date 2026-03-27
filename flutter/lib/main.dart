@@ -5,6 +5,8 @@ import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'dart:convert';
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
 
 enum LiftCategory { powerlifting, weightlifting }
 
@@ -46,6 +48,12 @@ class _VBTPageState extends State<VBTPage> {
   BluetoothDevice? _device;
   BluetoothCharacteristic? _velocityChar;
   StreamSubscription<List<int>>? _bleSub;
+  static const String kServiceUuid = "12345678-1234-1234-1234-123456789abc";
+  static const String kCharUuid = "abcd1234-ab12-ab12-ab12-abcdef123456";
+
+  // scan-stabilointi (status=6 estoon)
+  bool _isScanning = false;
+  DateTime? _lastScanAt;
 
   // löydetyt BLE-laitteet käyttäjän valintaa varten
   List<ScanResult> _scanResults = [];
@@ -89,6 +97,34 @@ class _VBTPageState extends State<VBTPage> {
     }
     final sum = _smoothingBuffer.fold(0.0, (a, b) => a + b);
     return sum / _smoothingBuffer.length;
+  }
+
+  // JSON BLE -> velocity laskenta
+  DateTime? _lastSampleTime;
+  double _velocityFromAcc = 0.0;
+
+  double _computeVelocityFromJson(Map<String, dynamic> j) {
+    final ax = (j['ax'] as num?)?.toDouble() ?? 0.0;
+    final ay = (j['ay'] as num?)?.toDouble() ?? 0.0;
+    final az = (j['az'] as num?)?.toDouble() ?? 9.81;
+
+    // poistetaan gravitaatio z-akselilta
+    final azNet = az - 9.81;
+    final totalAcc = sqrt(ax * ax + ay * ay + azNet * azNet); // m/s^2
+
+    final now = DateTime.now();
+    final dt = _lastSampleTime == null
+        ? 0.02
+        : (now.difference(_lastSampleTime!).inMilliseconds / 1000.0).clamp(0.001, 0.2);
+    _lastSampleTime = now;
+
+    // integrointi
+    _velocityFromAcc += totalAcc * dt;
+
+    // kevyt damping, ettei drifti karkaa
+    _velocityFromAcc *= 0.98;
+
+    return _velocityFromAcc;
   }
 
   // ----------------------------
@@ -298,6 +334,10 @@ class _VBTPageState extends State<VBTPage> {
       _x = 0.0;
       _smoothingBuffer.clear();
 
+      // nollataan myös JSON-integraattori uuden setin alussa
+      _lastSampleTime = null;
+      _velocityFromAcc = 0.0;
+
       peakVelocity = 0.0;
       meanVelocity = 0.0;
     });
@@ -323,6 +363,8 @@ class _VBTPageState extends State<VBTPage> {
       _velocitySpots.clear();
       _x = 0.0;
       _smoothingBuffer.clear();
+      _lastSampleTime = null;
+      _velocityFromAcc = 0.0;
     });
   }
 
@@ -344,27 +386,90 @@ class _VBTPageState extends State<VBTPage> {
 */
 
   Future<void> _scanBleDevices() async {
+    if (_isScanning) return;
+
+    // estää napin hakkaamisen -> Android status=6
+    if (_lastScanAt != null &&
+        DateTime.now().difference(_lastScanAt!) < const Duration(seconds: 2)) {
+      setState(() => connectionStatus = 'BLE: odota hetki ennen uutta skannausta');
+      return;
+    }
+
+    // Android 10 vaatii location-oikeuden BLE-skannaukseen
+    if (Platform.isAndroid) {
+      final locationStatus = await Permission.location.request();
+      final bluetoothStatus = await Permission.bluetooth.request();
+
+      // Android 12+ lisäoikeudet
+      final scanStatus = await Permission.bluetoothScan.request();
+      final connectStatus = await Permission.bluetoothConnect.request();
+
+      if (!locationStatus.isGranted ||
+          !bluetoothStatus.isGranted ||
+          !scanStatus.isGranted ||
+          !connectStatus.isGranted) {
+        setState(() => connectionStatus = 'BLE: oikeudet puuttuu');
+        return;
+      }
+    }
+
     setState(() {
+      _isScanning = true;
       connectionStatus = 'BLE: skannataan...';
       _scanResults = [];
     });
 
-    try {
-      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
-      final results = await FlutterBluePlus.scanResults.first;
-      await FlutterBluePlus.stopScan();
+    StreamSubscription<List<ScanResult>>? sub;
 
+    try {
+      // varmistus ettei vanha scan ole jäänyt päälle
+      await FlutterBluePlus.stopScan();
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      sub = FlutterBluePlus.scanResults.listen((results) {
+        if (!mounted) return;
+        setState(() {
+          _scanResults = results
+              .where((r) => r.device.platformName.trim().isNotEmpty)
+              .toList();
+        });
+      });
+
+      await FlutterBluePlus.startScan(
+        timeout: const Duration(seconds: 4),
+        androidUsesFineLocation: true, // tärkeä Android 10:lle
+      );
+
+      // odotetaan timeoutin verran
+      await Future.delayed(const Duration(seconds: 4));
+
+      await FlutterBluePlus.stopScan();
+      await sub.cancel();
+
+      if (!mounted) return;
       setState(() {
-        _scanResults = results.where((r) => r.device.platformName.trim().isNotEmpty).toList();
-        connectionStatus = _scanResults.isEmpty ? 'BLE: ei laitteita' : 'BLE: valitse laite (${_scanResults.length})';
+        _isScanning = false;
+        _lastScanAt = DateTime.now();
+        connectionStatus = _scanResults.isEmpty
+            ? 'BLE: ei laitteita'
+            : 'BLE: valitse laite (${_scanResults.length})';
       });
 
       if (_scanResults.isNotEmpty && mounted) {
         await _showDevicePicker();
       }
     } catch (e) {
-      await FlutterBluePlus.stopScan();
-      setState(() => connectionStatus = 'BLE-virhe: $e');
+      try {
+        await FlutterBluePlus.stopScan();
+      } catch (_) {}
+      await sub?.cancel();
+
+      if (!mounted) return;
+      setState(() {
+        _isScanning = false;
+        _lastScanAt = DateTime.now();
+        connectionStatus = 'BLE-virhe: $e';
+      });
     }
   }
 
@@ -409,41 +514,50 @@ class _VBTPageState extends State<VBTPage> {
 
       _device = device;
 
-      // OHITA connect() kokonaan toistaiseksi:
-      // await _device!.connect();
+      // TÄRKEÄ: oikea connect
+      await _device!.connect(timeout: const Duration(seconds: 10));
+
+      // pieni viive ennen service discoveryä
+      await Future.delayed(const Duration(milliseconds: 300));
 
       final services = await _device!.discoverServices();
 
       _velocityChar = null;
       for (final s in services) {
-        for (final c in s.characteristics) {
-          if (c.properties.notify) {
-            _velocityChar = c;
-            break;
+        if (s.uuid.str.toLowerCase() == kServiceUuid.toLowerCase()) {
+          for (final c in s.characteristics) {
+            if (c.uuid.str.toLowerCase() == kCharUuid.toLowerCase()) {
+              _velocityChar = c;
+              break;
+            }
           }
         }
         if (_velocityChar != null) break;
       }
 
       if (_velocityChar == null) {
-        setState(() => connectionStatus = 'BLE: notify characteristic puuttuu');
+        setState(() => connectionStatus = 'BLE: oikea characteristic puuttuu');
         return;
       }
 
       await _velocityChar!.setNotifyValue(true);
-      _bleSub = _velocityChar!.lastValueStream.listen((data) {
-        final raw = utf8.decode(data, allowMalformed: true).trim();
-        final parsed = double.tryParse(raw);
 
+      _bleSub = _velocityChar!.onValueReceived.listen((data) {
+        final raw = utf8.decode(data, allowMalformed: true).trim();
+
+        // Korvaa JSON-parsinta tällä
+        final parsed = double.tryParse(raw);
         if (parsed != null && mounted) {
           setState(() {
-            currentVelocity = parsed;
+            currentVelocity = parsed.clamp(0.0, 3.0).toDouble();
             connectionStatus = 'BLE: yhdistetty (${_device?.platformName ?? "laite"})';
 
-            // GATING myös BLE:lle: piirretään vain setin aikana
             if (isRecording) {
               _x += 1.0;
-              final v = selectedCategory == LiftCategory.weightlifting ? _smooth(currentVelocity) : currentVelocity;
+              final v = selectedCategory == LiftCategory.weightlifting
+                  ? _smooth(currentVelocity)
+                  : currentVelocity;
+
               _velocitySpots.add(FlSpot(_x, v));
               if (_velocitySpots.length > 120) {
                 _velocitySpots.removeAt(0);
@@ -465,12 +579,15 @@ class _VBTPageState extends State<VBTPage> {
     }
   }
 
+  // (valinnainen mutta suositeltava) _disconnectBle() turvallisemmaksi:
   Future<void> _disconnectBle() async {
     await _bleSub?.cancel();
     _bleSub = null;
 
     if (_device != null) {
-      await _device!.disconnect();
+      try {
+        await _device!.disconnect();
+      } catch (_) {}
     }
 
     setState(() {
@@ -824,8 +941,8 @@ class _VBTPageState extends State<VBTPage> {
                         children: [
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _scanBleDevices,
-                              child: const Text('Scan'),
+                              onPressed: _isScanning ? null : _scanBleDevices,
+                              child: Text(_isScanning ? 'Scanning...' : 'Scan'),
                             ),
                           ),
                           const SizedBox(width: 8),
