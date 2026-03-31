@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+header("Access-Control-Allow-Origin: *");
 header('Content-Type: application/json'); // Kerrotaan selaimelle/Flutterille, että tämä on JSONia
 
 $conn = new mysqli(DB_SERVER, DB_USERNAME, DB_PASSWORD, DB_NAME);

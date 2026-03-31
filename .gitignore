@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # Miscellaneous
 *.class
 *.log
@@ -47,10 +46,35 @@ app.*.map.json
 
 
 config.php
-=======
 flutter/build/
 flutter/.dart_tool/
 flutter/.flutter-plugins
 flutter/.flutter-plugins-dependencies
 flutter/*.iml
->>>>>>> flutter
+
+
+# KiCad väliaikaistiedostot ja varmuuskopiot
+*.bak
+*.kicad_pcb-bak
+*.sch-bak
+*~
+_autosave-*
+*.tmp
+
+# Projektin hallinta ja lukitus
+fp-info-cache
+*.lck
+
+# Valmistustiedostot (Gerberit yms.)
+# On yleensä parempi generoida nämä tarvittaessa kuin säilyttää gitissä
+[Gg]erber/
+[Oo]utputs/
+*.gbr
+*.drl
+*.pdf
+*.pos
+*.csv
+
+# Simulaatiotulokset
+*.csv
+*.plt

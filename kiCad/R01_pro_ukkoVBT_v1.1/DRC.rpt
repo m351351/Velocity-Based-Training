@@ -1,0 +1,20 @@
+** Drc report for pro_ukkoVBT.kicad_pcb **
+** Created on 2026-03-29T18:26:49+0300 **
+
+** Found 3 DRC violations **
+[holes_co_located]: Drilled holes co-located
+    Local override; warning
+    @(136.8500 mm, 109.1375 mm): Via [/ADC_BATT] on F.Cu - B.Cu
+    @(136.8500 mm, 109.1375 mm): Via [/ADC_BATT] on F.Cu - B.Cu
+[lib_footprint_mismatch]: Footprint 'TO-92_Inline' does not match copy in library 'Package_TO_SOT_THT'.
+    Local override; warning
+    @(136.5000 mm, 90.7300 mm): Footprint U3
+[lib_footprint_mismatch]: Footprint 'SOIC-8-1EP_3.9x4.9mm_P1.27mm_EP2.41x3.3mm_ThermalVias' does not match copy in library 'Package_SO'.
+    Local override; warning
+    @(138.9750 mm, 101.5950 mm): Footprint U5
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

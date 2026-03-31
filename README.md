@@ -5,3 +5,7 @@ An ESP32-based device for weightlifting analysis. Processes analog accelerometer
 
 Database is made using MySQL. 
 
+Asenna Android Studio: https://developer.android.com/studio/index.html
+komennot : 
+- flutter devices --> näyttää käytössä olevat laitteet aplikaation käyttöön
+- flutter doctor --> kertoo mitä latauksia pitää olla jotta laite toimii
