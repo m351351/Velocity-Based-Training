@@ -6,6 +6,13 @@ import 'dart:async';
 import 'dart:math';
 import 'package:fl_chart/fl_chart.dart';
 
+// Lisää tiedoston alkuun
+import 'dart:convert';
+
+// UUID-vakiot — SAMA kuin ESP32:ssa
+const String VBT_SERVICE_UUID = "12345678-1234-1234-1234-123456789abc";
+const String VBT_CHAR_UUID    = "abcd1234-ab12-ab12-ab12-abcdef123456";
+
 enum LiftCategory { powerlifting, weightlifting }
 
 void main() {
