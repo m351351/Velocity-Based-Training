@@ -21,7 +21,7 @@ class VBTApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Velocity Based Training',
-      theme: ThemeData.dark(), // Tumma teema kuntosaliympäristöön [cite: 40]
+      theme: ThemeData.dark(), // Tumma teema kuntosaliympäristöön
       home: const VBTPage(),
       debugShowCheckedModeBanner: false,
     );
@@ -35,33 +35,45 @@ class VBTPage extends StatefulWidget {
   State<VBTPage> createState() => _VBTPageState();
 }
 
-// TÄÄLLÄ ALOITUSNÄKYMÄÄN TULEVAT TEKSTIT -meri 190326
 class _VBTPageState extends State<VBTPage> {
   bool isRecording = false;
-  final List<double> _setVelocities = []; // tallennetaan sarjan nopeudet analyysiä varten
-  double peakVelocity = 0.0; // sarjan huippunopeus
-  double meanVelocity = 0.0; // sarjan keskinopeus
+  final List<double> _setVelocities = [];
+  double peakVelocity = 0.0;
+  double meanVelocity = 0.0;
+
+  bool _isBatteryUuid(String u) {
+  final x = u.toLowerCase();
+  return x == '2a19' || x == '00002a19-0000-1000-8000-00805f9b34fb';
+}
 
   bool useMockData = true;
   String connectionStatus = 'Mock data käytössä';
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _velocityChar;
+  BluetoothCharacteristic? _batteryChar;
+
   StreamSubscription<List<int>>? _bleSub;
+  StreamSubscription<List<int>>? _batterySub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
+
+  // UUSI: pollausvarmistus batteryyn (jos notify ei liiku)
+  Timer? _batteryPollTimer;
+
   static const String kServiceUuid = "12345678-1234-1234-1234-123456789abc";
   static const String kCharUuid = "abcd1234-ab12-ab12-ab12-abcdef123456";
+  static const String kBatteryServiceUuid = "0000180f-0000-1000-8000-00805f9b34fb";
+  static const String kBatteryCharUuid = "00002a19-0000-1000-8000-00805f9b34fb";
 
-  // scan-stabilointi (status=6 estoon)
+  int batteryPercent = -1; // -1 = ei tietoa
+
   bool _isScanning = false;
   DateTime? _lastScanAt;
-
-  // löydetyt BLE-laitteet käyttäjän valintaa varten
   List<ScanResult> _scanResults = [];
 
-  final List<FlSpot> _velocitySpots = []; // graafipisteet
-  double _x = 0.0; // ajan kulumista simuloiva muuttuja graafia varten
+  final List<FlSpot> _velocitySpots = [];
+  double _x = 0.0;
 
-  // Lajivalinta + liikevalinta
   LiftCategory selectedCategory = LiftCategory.powerlifting;
   String valittuLiike = "Takakyykky";
 
@@ -82,24 +94,19 @@ class _VBTPageState extends State<VBTPage> {
 
   double currentVelocity = 0.0;
   Timer? _timer;
-  double _t = 0.0; // simulointia varten "aika"
+  double _t = 0.0;
   final Random _random = Random();
 
-  // käyttäjän asettama tavoite velocity lossille
   double targetVelocityLoss = 20.0;
 
-  // smoothing painonnostolle (poistaa neulamaista sahanterää)
   final List<double> _smoothingBuffer = [];
   double _smooth(double raw, {int window = 5}) {
     _smoothingBuffer.add(raw);
-    if (_smoothingBuffer.length > window) {
-      _smoothingBuffer.removeAt(0);
-    }
+    if (_smoothingBuffer.length > window) _smoothingBuffer.removeAt(0);
     final sum = _smoothingBuffer.fold(0.0, (a, b) => a + b);
     return sum / _smoothingBuffer.length;
   }
 
-  // JSON BLE -> velocity laskenta
   DateTime? _lastSampleTime;
   double _velocityFromAcc = 0.0;
 
@@ -108,9 +115,8 @@ class _VBTPageState extends State<VBTPage> {
     final ay = (j['ay'] as num?)?.toDouble() ?? 0.0;
     final az = (j['az'] as num?)?.toDouble() ?? 9.81;
 
-    // poistetaan gravitaatio z-akselilta
     final azNet = az - 9.81;
-    final totalAcc = sqrt(ax * ax + ay * ay + azNet * azNet); // m/s^2
+    final totalAcc = sqrt(ax * ax + ay * ay + azNet * azNet);
 
     final now = DateTime.now();
     final dt = _lastSampleTime == null
@@ -118,18 +124,10 @@ class _VBTPageState extends State<VBTPage> {
         : (now.difference(_lastSampleTime!).inMilliseconds / 1000.0).clamp(0.001, 0.2);
     _lastSampleTime = now;
 
-    // integrointi
     _velocityFromAcc += totalAcc * dt;
-
-    // kevyt damping, ettei drifti karkaa
     _velocityFromAcc *= 0.98;
-
     return _velocityFromAcc;
   }
-
-  // ----------------------------
-  // Zone / luokittelulogiikka
-  // ----------------------------
 
   String get powerliftingZone {
     final v = meanVelocity;
@@ -142,13 +140,12 @@ class _VBTPageState extends State<VBTPage> {
 
   Color get powerliftingZoneColor {
     final v = meanVelocity;
-    if (v > 1.3) return const Color(0xFF4FC3F7); // kirkas sininen
-    if (v >= 0.75) return const Color(0xFF00E676); // vihreä
-    if (v >= 0.5) return const Color(0xFFFFB300); // keltainen/oranssi
-    return const Color(0xFFFF5252); // punainen
+    if (v > 1.3) return const Color(0xFF4FC3F7);
+    if (v >= 0.75) return const Color(0xFF00E676);
+    if (v >= 0.5) return const Color(0xFFFFB300);
+    return const Color(0xFFFF5252);
   }
 
-  // Painonnoston liikespesifiset peak-rajat
   (double min, double optLow, double optHigh) _wlThresholds(String liike) {
     switch (liike) {
       case "Tempaus":
@@ -171,7 +168,6 @@ class _VBTPageState extends State<VBTPage> {
     return const Color(0xFFFFB300);
   }
 
-  // Voimannostossa seurataan velocity lossia
   double get velocityLossPercent {
     if (_setVelocities.length < 2) return 0.0;
     final best = _setVelocities.reduce((a, b) => a > b ? a : b);
@@ -189,34 +185,24 @@ class _VBTPageState extends State<VBTPage> {
 
   String get analysisText {
     if (_setVelocities.isEmpty) return 'Odottaa sarjaa';
-    if (selectedCategory == LiftCategory.powerlifting) {
-      return 'Zone: $powerliftingZone';
-    } else {
-      final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
-      if (peakVelocity < min) return 'Peak alle minimin';
-      if (peakVelocity >= optLow && peakVelocity <= optHigh) return 'Peak optimaalisella alueella';
-      if (peakVelocity > optHigh) return 'Peak yli optimaalisen';
-      return 'Peak minimin yli';
-    }
+    if (selectedCategory == LiftCategory.powerlifting) return 'Zone: $powerliftingZone';
+
+    final (min, optLow, optHigh) = _wlThresholds(valittuLiike);
+    if (peakVelocity < min) return 'Peak alle minimin';
+    if (peakVelocity >= optLow && peakVelocity <= optHigh) return 'Peak optimaalisella alueella';
+    if (peakVelocity > optHigh) return 'Peak yli optimaalisen';
+    return 'Peak minimin yli';
   }
 
-  // ----------------------------
-  // Graafin apulogiikka
-  // ----------------------------
-
-  // Sticking point ~ alin nopeus sarjan keskialueella
   FlSpot? get stickingPointSpot {
     if (_velocitySpots.length < 10 || selectedCategory != LiftCategory.powerlifting) return null;
-
     final start = (_velocitySpots.length * 0.25).floor();
     final end = (_velocitySpots.length * 0.75).floor();
     if (end <= start) return null;
 
     FlSpot minSpot = _velocitySpots[start];
     for (int i = start + 1; i < end; i++) {
-      if (_velocitySpots[i].y < minSpot.y) {
-        minSpot = _velocitySpots[i];
-      }
+      if (_velocitySpots[i].y < minSpot.y) minSpot = _velocitySpots[i];
     }
     return minSpot;
   }
@@ -270,51 +256,41 @@ class _VBTPageState extends State<VBTPage> {
   Color get heroColor => selectedCategory == LiftCategory.powerlifting ? powerliftingZoneColor : weightliftingColor;
   String get heroLabel => selectedCategory == LiftCategory.powerlifting ? 'Mean Velocity' : 'Peak Velocity';
 
-  // mittaripalkki 0..1
   double get zoneGaugeValue {
-    if (selectedCategory == LiftCategory.powerlifting) {
-      return (meanVelocity / 1.5).clamp(0.0, 1.0);
-    } else {
-      return (peakVelocity / 2.6).clamp(0.0, 1.0);
-    }
+    if (selectedCategory == LiftCategory.powerlifting) return (meanVelocity / 1.5).clamp(0.0, 1.0);
+    return (peakVelocity / 2.6).clamp(0.0, 1.0);
   }
 
-  // Tässä mock-datalla simuloidaan kiihtyvyysanturin dataa
   @override
   void initState() {
     super.initState();
 
     _timer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       setState(() {
-        _t += 0.1; // Simuloidaan ajan kulumista
+        _t += 0.1;
 
         if (useMockData) {
           if (selectedCategory == LiftCategory.powerlifting) {
-            // Voimannosto: "The Grind Curve", mukana keskialueen notkahdus
             final base = 0.45 + 0.22 * sin(_t * 0.85);
-            final phase = (_t % 3.0) / 3.0; // 0..1
+            final phase = (_t % 3.0) / 3.0;
             final stickingDip = (phase > 0.40 && phase < 0.62) ? -0.10 : 0.0;
             final noise = (_random.nextDouble() - 0.5) * 0.03;
             currentVelocity = max(0.0, base + stickingDip + noise);
           } else {
-            // Painonnosto: "The Double Peak"
-            final phase = (_t % 1.2); // lyhyt sykli
+            final phase = (_t % 1.2);
             double v = 0.08;
-            v += 0.9 * exp(-pow((phase - 0.28) / 0.11, 2).toDouble()); // 1st pull
-            v -= 0.25 * exp(-pow((phase - 0.46) / 0.07, 2).toDouble()); // transition
-            v += 1.7 * exp(-pow((phase - 0.63) / 0.09, 2).toDouble()); // 2nd pull
+            v += 0.9 * exp(-pow((phase - 0.28) / 0.11, 2).toDouble());
+            v -= 0.25 * exp(-pow((phase - 0.46) / 0.07, 2).toDouble());
+            v += 1.7 * exp(-pow((phase - 0.63) / 0.09, 2).toDouble());
             final noise = (_random.nextDouble() - 0.5) * 0.04;
-            currentVelocity = max(0.0, _smooth(v + noise)); // smoothing vain painonnostolle
+            currentVelocity = max(0.0, _smooth(v + noise));
           }
         }
 
-        // GATING: graafiin lisätään pisteitä vain kun setti käy
         if (isRecording) {
           _x += 1.0;
           _velocitySpots.add(FlSpot(_x, currentVelocity));
-          if (_velocitySpots.length > 120) {
-            _velocitySpots.removeAt(0); // graafin skaalaus viimeisiin pisteisiin
-          }
+          if (_velocitySpots.length > 120) _velocitySpots.removeAt(0);
 
           _setVelocities.add(currentVelocity);
           peakVelocity = _setVelocities.reduce((a, b) => a > b ? a : b);
@@ -327,17 +303,12 @@ class _VBTPageState extends State<VBTPage> {
   void _startSet() {
     setState(() {
       isRecording = true;
-
-      // START tyhjentää sarjan datan + graafin, ettei vanha kohina kummittele
       _setVelocities.clear();
       _velocitySpots.clear();
       _x = 0.0;
       _smoothingBuffer.clear();
-
-      // nollataan myös JSON-integraattori uuden setin alussa
       _lastSampleTime = null;
       _velocityFromAcc = 0.0;
-
       peakVelocity = 0.0;
       meanVelocity = 0.0;
     });
@@ -346,7 +317,6 @@ class _VBTPageState extends State<VBTPage> {
   void _stopSet() {
     setState(() {
       isRecording = false;
-      // STOP jättää viimeisen sarjan graafin näkyviin analyysiä varten
       if (_setVelocities.isNotEmpty) {
         peakVelocity = _setVelocities.reduce((a, b) => a > b ? a : b);
         meanVelocity = _setVelocities.reduce((a, b) => a + b) / _setVelocities.length;
@@ -368,39 +338,18 @@ class _VBTPageState extends State<VBTPage> {
     });
   }
 
-  // Tänne tulee myöhemmin kiihtyvyysanturin data [cite: 25, 76]
-
-/* //TÄMÄ PÄÄLLE KUN HALUTAAN KÄYTTÄÄ KÄYTTÖLIITTYMÄÄ PUHELIMELLA, POIS PÄÄLTÄ JOS KEHITYS KONEELLA -meri 190326
-  @override
-  void initState() {
-    super.initState();
-
-    FlutterBluePlus.adapterState.listen((BluetoothAdapterState state) {
-      if (state == BluetoothAdapterState.on) {
-        debugPrint("Bluetooth on päällä ja valmis VBT-laitteen hakuun.");
-      } else {
-        debugPrint("Bluetooth on pois päältä, tarttis varmaan tehdä jotain");
-      }
-    });
-  }
-*/
-
   Future<void> _scanBleDevices() async {
     if (_isScanning) return;
 
-    // estää napin hakkaamisen -> Android status=6
     if (_lastScanAt != null &&
         DateTime.now().difference(_lastScanAt!) < const Duration(seconds: 2)) {
       setState(() => connectionStatus = 'BLE: odota hetki ennen uutta skannausta');
       return;
     }
 
-    // Android 10 vaatii location-oikeuden BLE-skannaukseen
     if (Platform.isAndroid) {
       final locationStatus = await Permission.location.request();
       final bluetoothStatus = await Permission.bluetooth.request();
-
-      // Android 12+ lisäoikeudet
       final scanStatus = await Permission.bluetoothScan.request();
       final connectStatus = await Permission.bluetoothConnect.request();
 
@@ -422,25 +371,21 @@ class _VBTPageState extends State<VBTPage> {
     StreamSubscription<List<ScanResult>>? sub;
 
     try {
-      // varmistus ettei vanha scan ole jäänyt päälle
       await FlutterBluePlus.stopScan();
       await Future.delayed(const Duration(milliseconds: 200));
 
       sub = FlutterBluePlus.scanResults.listen((results) {
         if (!mounted) return;
         setState(() {
-          _scanResults = results
-              .where((r) => r.device.platformName.trim().isNotEmpty)
-              .toList();
+          _scanResults = results.where((r) => r.device.platformName.trim().isNotEmpty).toList();
         });
       });
 
       await FlutterBluePlus.startScan(
         timeout: const Duration(seconds: 4),
-        androidUsesFineLocation: true, // tärkeä Android 10:lle
+        androidUsesFineLocation: true,
       );
 
-      // odotetaan timeoutin verran
       await Future.delayed(const Duration(seconds: 4));
 
       await FlutterBluePlus.stopScan();
@@ -455,9 +400,7 @@ class _VBTPageState extends State<VBTPage> {
             : 'BLE: valitse laite (${_scanResults.length})';
       });
 
-      if (_scanResults.isNotEmpty && mounted) {
-        await _showDevicePicker();
-      }
+      if (_scanResults.isNotEmpty && mounted) await _showDevicePicker();
     } catch (e) {
       try {
         await FlutterBluePlus.stopScan();
@@ -505,6 +448,12 @@ class _VBTPageState extends State<VBTPage> {
     try {
       await _bleSub?.cancel();
       _bleSub = null;
+      await _batterySub?.cancel();
+      _batterySub = null;
+      await _connSub?.cancel();
+      _connSub = null;
+      _batteryPollTimer?.cancel();
+      _batteryPollTimer = null;
 
       if (_device != null) {
         try {
@@ -513,27 +462,49 @@ class _VBTPageState extends State<VBTPage> {
       }
 
       _device = device;
-
-      // TÄRKEÄ: oikea connect
       await _device!.connect(timeout: const Duration(seconds: 10));
-
-      // pieni viive ennen service discoveryä
       await Future.delayed(const Duration(milliseconds: 300));
+
+      _connSub = _device!.connectionState.listen((state) {
+        if (!mounted) return;
+        if (state == BluetoothConnectionState.disconnected) {
+          setState(() {
+            connectionStatus = 'BLE: yhteys katkesi';
+            batteryPercent = -1;
+          });
+        }
+      });
 
       final services = await _device!.discoverServices();
 
       _velocityChar = null;
+      _batteryChar = null;
+
       for (final s in services) {
+        // oma velocity service/char
         if (s.uuid.str.toLowerCase() == kServiceUuid.toLowerCase()) {
           for (final c in s.characteristics) {
             if (c.uuid.str.toLowerCase() == kCharUuid.toLowerCase()) {
               _velocityChar = c;
-              break;
             }
+            // Battery samaan serviceen fallbackina
+            // UUSI
+if (_isBatteryUuid(c.uuid.str)) {
+  _batteryChar = c;
+}
           }
         }
-        if (_velocityChar != null) break;
+
+        // battery char voi olla missä tahansa servicessä
+        for (final c in s.characteristics) {
+          // UUSI
+if (_isBatteryUuid(c.uuid.str)) {
+  _batteryChar = c;
+}
+        }
       }
+
+      debugPrint('Battery char found: ${_batteryChar != null}');
 
       if (_velocityChar == null) {
         setState(() => connectionStatus = 'BLE: oikea characteristic puuttuu');
@@ -545,7 +516,7 @@ class _VBTPageState extends State<VBTPage> {
       _bleSub = _velocityChar!.onValueReceived.listen((data) {
         final raw = utf8.decode(data, allowMalformed: true).trim();
 
-        // Korvaa JSON-parsinta tällä
+        // lähetätte nyt numeron tekstinä (esim "0.734")
         final parsed = double.tryParse(raw);
         if (parsed != null && mounted) {
           setState(() {
@@ -571,6 +542,60 @@ class _VBTPageState extends State<VBTPage> {
         }
       });
 
+      // Akku: ota notify käyttöön jos löytyy
+      if (_batteryChar != null) {
+        try {
+          await _batteryChar!.setNotifyValue(true);
+
+          _batterySub = _batteryChar!.onValueReceived.listen((data) {
+            debugPrint('Battery bytes: $data');
+            if (data.isNotEmpty && mounted) {
+              final b = data[0].clamp(0, 100);
+              setState(() => batteryPercent = b);
+            }
+          });
+
+          // luetaan myös kerran heti
+          try {
+            final initial = await _batteryChar!.read();
+            debugPrint('Battery initial read: $initial');
+            if (initial.isNotEmpty && mounted) {
+              setState(() => batteryPercent = initial[0].clamp(0, 100));
+            }
+          } catch (e) {
+            debugPrint('Battery initial read failed: $e');
+          }
+        } catch (e) {
+          debugPrint('Battery notify enable failed: $e');
+          // fallback pelkkä read
+          try {
+            final initial = await _batteryChar!.read();
+            debugPrint('Battery fallback read: $initial');
+            if (initial.isNotEmpty && mounted) {
+              setState(() => batteryPercent = initial[0].clamp(0, 100));
+            }
+          } catch (e2) {
+            debugPrint('Battery fallback read failed: $e2');
+          }
+        }
+
+        // polling fallback
+        _batteryPollTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+          if (_batteryChar == null || !mounted) return;
+          try {
+            final data = await _batteryChar!.read();
+            debugPrint('Battery poll read: $data');
+            if (data.isNotEmpty && mounted) {
+              setState(() => batteryPercent = data[0].clamp(0, 100));
+            }
+          } catch (e) {
+            debugPrint('Battery poll read failed: $e');
+          }
+        });
+      } else {
+        setState(() => batteryPercent = -1);
+      }
+
       setState(() {
         connectionStatus = 'BLE: yhdistetty (${_device?.platformName ?? "laite"})';
       });
@@ -584,6 +609,15 @@ class _VBTPageState extends State<VBTPage> {
     await _bleSub?.cancel();
     _bleSub = null;
 
+    await _batterySub?.cancel();
+    _batterySub = null;
+
+    await _connSub?.cancel();
+    _connSub = null;
+
+    _batteryPollTimer?.cancel();
+    _batteryPollTimer = null;
+
     if (_device != null) {
       try {
         await _device!.disconnect();
@@ -591,6 +625,9 @@ class _VBTPageState extends State<VBTPage> {
     }
 
     setState(() {
+      _velocityChar = null;
+      _batteryChar = null;
+      batteryPercent = -1;
       connectionStatus = 'BLE: ei yhdistetty';
     });
   }
@@ -599,6 +636,9 @@ class _VBTPageState extends State<VBTPage> {
   void dispose() {
     _timer?.cancel();
     _bleSub?.cancel();
+    _batterySub?.cancel();
+    _connSub?.cancel();
+    _batteryPollTimer?.cancel();
     _device?.disconnect();
     super.dispose();
   }
@@ -648,10 +688,7 @@ class _VBTPageState extends State<VBTPage> {
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              heroColor.withOpacity(0.18),
-              Colors.black,
-            ],
+            colors: [heroColor.withOpacity(0.18), Colors.black],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -659,19 +696,12 @@ class _VBTPageState extends State<VBTPage> {
         child: SafeArea(
           child: Column(
             children: [
-              // A) Yläosa: lajitabit
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
                 child: SegmentedButton<LiftCategory>(
                   segments: const [
-                    ButtonSegment(
-                      value: LiftCategory.powerlifting,
-                      label: Text('VOIMA'),
-                    ),
-                    ButtonSegment(
-                      value: LiftCategory.weightlifting,
-                      label: Text('PAINO'),
-                    ),
+                    ButtonSegment(value: LiftCategory.powerlifting, label: Text('VOIMA')),
+                    ButtonSegment(value: LiftCategory.weightlifting, label: Text('PAINO')),
                   ],
                   selected: {selectedCategory},
                   onSelectionChanged: (newSelection) {
@@ -689,7 +719,6 @@ class _VBTPageState extends State<VBTPage> {
                 ),
               ),
 
-              // Liikevalinta tekstinä + modal
               InkWell(
                 onTap: _pickLift,
                 borderRadius: BorderRadius.circular(12),
@@ -698,10 +727,7 @@ class _VBTPageState extends State<VBTPage> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        valittuLiike,
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
-                      ),
+                      Text(valittuLiike, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
                       const SizedBox(width: 8),
                       const Icon(Icons.expand_more),
                     ],
@@ -710,29 +736,14 @@ class _VBTPageState extends State<VBTPage> {
               ),
 
               const SizedBox(height: 6),
-
-              // B) Keskiosa: sankarinumero
-              Text(
-                heroLabel,
-                style: const TextStyle(fontSize: 14, color: Colors.white70),
-              ),
+              Text(heroLabel, style: const TextStyle(fontSize: 14, color: Colors.white70)),
               Text(
                 heroValue.toStringAsFixed(2),
-                style: TextStyle(
-                  fontSize: 92,
-                  fontWeight: FontWeight.w900,
-                  color: heroColor,
-                  height: 0.95,
-                ),
+                style: TextStyle(fontSize: 92, fontWeight: FontWeight.w900, color: heroColor, height: 0.95),
               ),
-              const Text(
-                'm/s',
-                style: TextStyle(fontSize: 18, color: Colors.white70),
-              ),
-
+              const Text('m/s', style: TextStyle(fontSize: 18, color: Colors.white70)),
               const SizedBox(height: 8),
 
-              // Zone/gauge
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 18),
                 child: Column(
@@ -759,7 +770,6 @@ class _VBTPageState extends State<VBTPage> {
 
               const SizedBox(height: 10),
 
-              // C) Alaosa: matalampi graafi
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -769,21 +779,17 @@ class _VBTPageState extends State<VBTPage> {
                       maxY: isPowerlifting ? 1.5 : 2.6,
                       gridData: const FlGridData(show: false),
                       extraLinesData: ExtraLinesData(horizontalLines: zoneLines),
-                      rangeAnnotations: RangeAnnotations(
-                        horizontalRangeAnnotations: zoneBackgroundRanges,
-                      ),
+                      rangeAnnotations: RangeAnnotations(horizontalRangeAnnotations: zoneBackgroundRanges),
                       titlesData: FlTitlesData(
                         leftTitles: AxisTitles(
                           sideTitles: SideTitles(
                             showTitles: true,
                             reservedSize: 30,
                             interval: isPowerlifting ? 0.5 : 1.0,
-                            getTitlesWidget: (value, meta) {
-                              return Text(
-                                value.toStringAsFixed(1),
-                                style: const TextStyle(fontSize: 10, color: Colors.white70),
-                              );
-                            },
+                            getTitlesWidget: (value, meta) => Text(
+                              value.toStringAsFixed(1),
+                              style: const TextStyle(fontSize: 10, color: Colors.white70),
+                            ),
                           ),
                         ),
                         bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
@@ -794,7 +800,7 @@ class _VBTPageState extends State<VBTPage> {
                       lineBarsData: [
                         LineChartBarData(
                           spots: safeSpots,
-                          isCurved: true, // pehmennetty viiva
+                          isCurved: true,
                           curveSmoothness: 0.28,
                           color: lineColor,
                           barWidth: 4,
@@ -820,10 +826,7 @@ class _VBTPageState extends State<VBTPage> {
                               );
                             },
                           ),
-                          belowBarData: BarAreaData(
-                            show: safeSpots.length >= 2,
-                            color: lineColor.withOpacity(0.08),
-                          ),
+                          belowBarData: BarAreaData(show: safeSpots.length >= 2, color: lineColor.withOpacity(0.08)),
                         ),
                       ],
                     ),
@@ -848,7 +851,6 @@ class _VBTPageState extends State<VBTPage> {
                   ),
                 ),
 
-              // Loss-rivi
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: Row(
@@ -870,9 +872,7 @@ class _VBTPageState extends State<VBTPage> {
                             duration: const Duration(milliseconds: 250),
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
-                              color: lossOverLimit
-                                  ? Colors.red.withOpacity(0.15 * opacity)
-                                  : Colors.transparent,
+                              color: lossOverLimit ? Colors.red.withOpacity(0.15 * opacity) : Colors.transparent,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: child,
@@ -893,7 +893,6 @@ class _VBTPageState extends State<VBTPage> {
                 ),
               ),
 
-              // Kevyt BLE-paneeli (minimal mutta käytännöllinen)
               Container(
                 margin: const EdgeInsets.fromLTRB(12, 4, 12, 8),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -926,6 +925,7 @@ class _VBTPageState extends State<VBTPage> {
                                   useMockData = value;
                                   if (value) {
                                     connectionStatus = 'Mock data käytössä';
+                                    batteryPercent = -1;
                                   } else {
                                     connectionStatus = 'BLE: ei yhdistetty';
                                   }
@@ -936,6 +936,20 @@ class _VBTPageState extends State<VBTPage> {
                         ),
                       ],
                     ),
+                    if (!useMockData)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.battery_std, size: 16, color: Colors.white70),
+                            const SizedBox(width: 6),
+                            Text(
+                              batteryPercent >= 0 ? 'Akku: $batteryPercent%' : 'Akku: ei tietoa',
+                              style: const TextStyle(fontSize: 12, color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (!useMockData)
                       Row(
                         children: [
@@ -958,7 +972,6 @@ class _VBTPageState extends State<VBTPage> {
                 ),
               ),
 
-              // Jättinappi alareunaan
               SafeArea(
                 top: false,
                 child: SizedBox(
@@ -969,13 +982,7 @@ class _VBTPageState extends State<VBTPage> {
                       backgroundColor: isRecording ? Colors.redAccent : Colors.green,
                       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
                     ),
-                    onPressed: () {
-                      if (isRecording) {
-                        _stopSet();
-                      } else {
-                        _startSet();
-                      }
-                    },
+                    onPressed: () => isRecording ? _stopSet() : _startSet(),
                     child: Text(
                       isRecording ? 'STOP SET' : 'START SET',
                       style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
