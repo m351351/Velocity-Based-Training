@@ -1,6 +1,6 @@
 # Velocity-Based Training (VBT) - Device
 
-Tämä projekti on osa Oulun ammattikorkeakoulun tieto- ja viestintätekniikan toisen vuoden kevään sovellusprojekti-kurssia (2026). Projektin kesto on 7 viikkoa.
+Tämä projekti on osa Oulun ammattikorkeakoulun tieto- ja viestintätekniikan toisen vuoden kevään elektroniikan sovellusprojekti-kurssia (2026). Projektin kesto on 7 viikkoa.
 
 ## Sisällysluettelo
 * [Yleiskuvaus](#yleiskuvaus)
