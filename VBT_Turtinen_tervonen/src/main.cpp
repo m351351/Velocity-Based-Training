@@ -33,15 +33,21 @@ BLECharacteristic* pBatteryCharacteristic  = nullptr;
 
 bool bleConnected = false;
 float velocity = 0.0f;
-unsigned long lastVelMs = 0;
-unsigned long lastBattMs = 0;
+bool activeMode = false; // true kun BLE connected
 
+const uint32_t ACTIVE_IMU_INTERVAL_MS   = 40;   // 25 Hz
+const uint32_t ACTIVE_NOTIFY_MS         = 200;  // 5 Hz
+const uint32_t ACTIVE_BATT_MS           = 15000;
 
-// ----------------- BLE & SENSOR LOGIC -----------------
-unsigned long lastVelNotifyMs = 0;
+const uint32_t IDLE_BATT_MS             = 60000; // 60 s
+const uint32_t IDLE_LOOP_DELAY_MS       = 200;   // iso säästö
+
 unsigned long lastImuMs = 0;
-const uint32_t IMU_INTERVAL_MS = 20; // 50 Hz
-const uint32_t VEL_NOTIFY_INTERVAL_MS = 80; // max 12.5 Hz
+unsigned long lastVelNotifyMs = 0;
+unsigned long lastBattMs = 0;
+unsigned long lastVelMs = 0;
+float lastSentVelocity = -999.0f;
+const float VEL_EPS = 0.02f;
 
 float battEmaVoltage = 3.9f;
 int lastSentBattery = -1;
@@ -49,11 +55,14 @@ int lastSentBattery = -1;
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override {
     bleConnected = true;
-    Serial.println("BLE connected");
+    activeMode = true;
+    Serial.println("BLE connected -> ACTIVE MODE");
   }
   void onDisconnect(BLEServer* s) override {
     bleConnected = false;
-    Serial.println("BLE disconnected");
+    activeMode = false;
+    velocity = 0.0f;
+    Serial.println("BLE disconnected -> IDLE MODE");
     s->startAdvertising();
   }
 };
@@ -171,6 +180,9 @@ void setup() {
 
   lastVelMs = millis();
   lastBattMs = millis();
+  lastVelNotifyMs = millis();
+  lastImuMs = millis();
+  activeMode = false; // odotetaan yhteyttä ennen mittausta
   updateBattery(false);
 
   Serial.println("VBT valmis");
@@ -178,10 +190,23 @@ void setup() {
 }
 
 void loop() {
-  unsigned long now = millis();
+  const unsigned long now = millis();
 
-  // IMU + velocity @ 50 Hz
-  if (now - lastImuMs >= IMU_INTERVAL_MS) {
+  if (!activeMode) {
+    // -------- IDLE: minimikulutus --------
+    if (now - lastBattMs >= IDLE_BATT_MS) {
+      lastBattMs = now;
+      updateBattery(false); // ei notifya ilman yhteyttä
+    }
+
+    delay(IDLE_LOOP_DELAY_MS);
+    return;
+  }
+
+  // -------- ACTIVE: yhteys päällä --------
+
+  // IMU + velocity
+  if (now - lastImuMs >= ACTIVE_IMU_INTERVAL_MS) {
     lastImuMs = now;
 
     if (imu.accelerationAvailable()) {
@@ -194,26 +219,31 @@ void loop() {
       float dt = (now - lastVelMs) / 1000.0f;
       lastVelMs = now;
 
-      if (dynamicAccG > 0.15f) velocity += dynamicAccG * 9.81f * dt; // m/s^2 -> m/s
-      else {
-        velocity *= 0.8f;
-        if (velocity < 0.05f) velocity = 0.0f;
+      if (dynamicAccG > 0.15f) {
+        velocity += (dynamicAccG * 9.81f) * dt;
+      } else {
+        velocity *= 0.85f;
+        if (velocity < 0.03f) velocity = 0.0f;
       }
+
       velocity = constrain(velocity, 0.0f, 3.0f);
     }
   }
 
-  // BLE velocity notify @ 12.5 Hz
-  if (bleConnected && (now - lastVelNotifyMs >= VEL_NOTIFY_INTERVAL_MS)) {
-    lastVelNotifyMs = now;
+  // Velocity notify harvemmin
+  if (bleConnected && (now - lastVelNotifyMs >= ACTIVE_NOTIFY_MS)) {
+    lastVelNotifyMs = now; // päivitä aina kun aikaväli täyttyy
+    if (fabsf(velocity - lastSentVelocity) >= VEL_EPS) {
     char buf[16];
     dtostrf(velocity, 4, 3, buf);
     pVelocityCharacteristic->setValue(buf);
     pVelocityCharacteristic->notify();
+    lastSentVelocity = velocity;
+  }
   }
 
-  // Battery @ 10 s
-  if (now - lastBattMs >= 10000) {
+  // Akku ACTIVE-tilassa
+  if (now - lastBattMs >= ACTIVE_BATT_MS) {
     lastBattMs = now;
     updateBattery(true);
   }
