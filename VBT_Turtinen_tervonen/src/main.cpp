@@ -19,7 +19,6 @@
 #define BATTERY_CHAR_UUID   "00002a19-0000-1000-8000-00805f9b34fb"
 
 // ---------------- Battery tuning ----------------
-// Kalibroi tarvittaessa yleismittarilla
 static constexpr float ADC_REF       = 3.3f;
 static constexpr float ADC_MAX       = 4095.0f;
 static constexpr float BATT_SCALE    = 2.00f;   // 1:1 jännitejakaja ~2.00
@@ -36,6 +35,13 @@ bool bleConnected = false;
 float velocity = 0.0f;
 unsigned long lastVelMs = 0;
 unsigned long lastBattMs = 0;
+
+
+// ----------------- BLE & SENSOR LOGIC -----------------
+unsigned long lastVelNotifyMs = 0;
+unsigned long lastImuMs = 0;
+const uint32_t IMU_INTERVAL_MS = 20; // 50 Hz
+const uint32_t VEL_NOTIFY_INTERVAL_MS = 80; // max 12.5 Hz
 
 float battEmaVoltage = 3.9f;
 int lastSentBattery = -1;
@@ -168,41 +174,49 @@ void setup() {
   updateBattery(false);
 
   Serial.println("VBT valmis");
+  
 }
 
 void loop() {
-  // Velocity
-  if (imu.accelerationAvailable()) {
-    float ax, ay, az;
-    imu.readAcceleration(ax, ay, az);
+  unsigned long now = millis();
 
-    float totalAcc = sqrtf(ax * ax + ay * ay + az * az) * 9.81f;
-    float dynamicAcc = fabsf(totalAcc - 9.81f);
+  // IMU + velocity @ 50 Hz
+  if (now - lastImuMs >= IMU_INTERVAL_MS) {
+    lastImuMs = now;
 
-    unsigned long now = millis();
-    float dt = (now - lastVelMs) / 1000.0f;
-    lastVelMs = now;
+    if (imu.accelerationAvailable()) {
+      float ax, ay, az;
+      imu.readAcceleration(ax, ay, az);
 
-    if (dynamicAcc > 1.5f) velocity += dynamicAcc * dt;
-    else {
-      velocity *= 0.8f;
-      if (velocity < 0.05f) velocity = 0.0f;
-    }
-    velocity = constrain(velocity, 0.0f, 3.0f);
+      float totalAccG = sqrtf(ax * ax + ay * ay + az * az);
+      float dynamicAccG = fabsf(totalAccG - 1.0f);
 
-    if (bleConnected) {
-      char buf[16];
-      dtostrf(velocity, 4, 3, buf);
-      pVelocityCharacteristic->setValue(buf);
-      pVelocityCharacteristic->notify();
+      float dt = (now - lastVelMs) / 1000.0f;
+      lastVelMs = now;
+
+      if (dynamicAccG > 0.15f) velocity += dynamicAccG * 9.81f * dt; // m/s^2 -> m/s
+      else {
+        velocity *= 0.8f;
+        if (velocity < 0.05f) velocity = 0.0f;
+      }
+      velocity = constrain(velocity, 0.0f, 3.0f);
     }
   }
 
-  // Battery @ 5 s
-  if (millis() - lastBattMs >= 5000) {
-    lastBattMs = millis();
+  // BLE velocity notify @ 12.5 Hz
+  if (bleConnected && (now - lastVelNotifyMs >= VEL_NOTIFY_INTERVAL_MS)) {
+    lastVelNotifyMs = now;
+    char buf[16];
+    dtostrf(velocity, 4, 3, buf);
+    pVelocityCharacteristic->setValue(buf);
+    pVelocityCharacteristic->notify();
+  }
+
+  // Battery @ 10 s
+  if (now - lastBattMs >= 10000) {
+    lastBattMs = now;
     updateBattery(true);
   }
 
-  delay(40);
+  delay(5);
 }
