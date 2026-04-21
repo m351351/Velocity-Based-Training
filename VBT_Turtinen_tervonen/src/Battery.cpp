@@ -29,11 +29,18 @@ static float rawToBatteryVoltage(int raw) {
 
 
 static int voltageToPercent(float v) {
-  if (v >= BATT_MAX_V) return 100;
-  if (v <= BATT_MIN_V) return 0;
-  return (int)((v - BATT_MIN_V) / (BATT_MAX_V - BATT_MIN_V) * 100.0f);
+    // Epälineaarinen mappaus: useimmat LiPo-akut ovat 50% kohdalla n. 3.7V - 3.8V välissä
+    if (v >= 4.15f) return 100;
+    if (v <= 3.30f) return 0;
+    
+    if (v > 3.80f) {
+        // Alue 4.15V - 3.80V (n. 80% kapasiteetista on tässä välissä)
+        return 50 + (int)((v - 3.80f) / (4.15f - 3.80f) * 50.0f);
+    } else {
+        // Alue 3.80V - 3.30V (viimeiset 20-50% putoavat jyrkemmin)
+        return (int)((v - 3.30f) / (3.80f - 3.30f) * 50.0f);
+    }
 }
-
 
 
 
@@ -45,20 +52,38 @@ uint8_t readBatteryPercent(float* outVoltage, int* outRaw) {
     s[i] = analogRead(BATT_ADC_PIN);
     delay(2);
   }
+  
+  // Lajitellaan taulukko mediaania varten
   for (int i = 0; i < N - 1; i++) {
     for (int j = i + 1; j < N; j++) {
-      if (s[j] < s[i]) { int t = s[i]; s[i] = s[j]; s[j] = t; }
+      if (s[j] < s[i]) { 
+        int t = s[i]; 
+        s[i] = s[j]; 
+        s[j] = t; 
+      }
     }
   }
   int median = s[N / 2];
 
   float vNow = rawToBatteryVoltage(median);
-  battEmaVoltage = (1.0f - EMA_ALPHA) * battEmaVoltage + EMA_ALPHA * vNow;
 
+  // KORJAUS: Estetään hidas vaeltaminen käynnistyksessä.
+  // Jos tämä on ensimmäinen lukukerta, asetetaan suodattimen pohja suoraan nykyiseen arvoon.
+  static bool isFirstRead = true;
+  if (isFirstRead) {
+    battEmaVoltage = vNow;
+    isFirstRead = false;
+  } else {
+    // Tavallinen EMA-suodatus jatkokerroilla
+    battEmaVoltage = (1.0f - EMA_ALPHA) * battEmaVoltage + EMA_ALPHA * vNow;
+  }
+
+  // Lasketaan prosentit käyttäen aiemmin ehdotettua epälineaarista voltageToPercent-funktiota
   int pct = constrain(voltageToPercent(battEmaVoltage), 0, 100);
 
   if (outVoltage) *outVoltage = battEmaVoltage;
   if (outRaw) *outRaw = median;
+  
   return (uint8_t)pct;
 }
 

@@ -116,7 +116,7 @@ void sendVelocityNotify(float velocity) {
 
     if (velocity > 0.01f || lastSentVel > 0.01f) {
     char buf[16];
-    dtostrf(velocity, 4, 3, buf);
+    dtostrf(velocity, 6, 3, buf);
     pVelocityCharacteristic->setValue(buf);
     pVelocityCharacteristic->notify();
     lastSentVel = velocity;

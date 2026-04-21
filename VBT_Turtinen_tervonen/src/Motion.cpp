@@ -119,7 +119,7 @@ void handleMotion(){
             }
 
             // Rajoitetaan sisäinen nopeus (Estetään syvä miinus)
-            internalVelocity = constrain(internalVelocity, -0.5f, 5.0f);
+            internalVelocity = constrain(internalVelocity, -0.5f, 10.0f);
 
 // 3. KÄYTTÖLIITTYMÄN PÄIVITYS JA TOISTOJEN TUNNISTUS
             if (internalVelocity > 0.0f) {
@@ -159,9 +159,9 @@ void handleMotion(){
             }
 
             // Debug tulostus perinteiseen tapaan
-           // if (velocity > 0.01f || restCounter < 15) {
-                 // Serial.printf("%lu,%.3f,%.3f,%.3f,%.3f\n", now, totalAccG, dynamicAccG, internalVelocity, velocity);
-            //}
+            if (velocity > 0.01f || restCounter < 15) {
+                 Serial.printf("%lu,%.3f,%.3f,%.3f,%.3f\n", now, totalAccG, dynamicAccG, internalVelocity, velocity);
+            }
         }
     }
 }
