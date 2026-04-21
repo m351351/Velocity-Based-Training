@@ -22,12 +22,23 @@ const uint32_t VEL_NOTIFY_INTERVAL_MS = 80; // max 12.5 Hz
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer*) override {
     bleConnected = true;
-    Serial.println("BLE connected");
+    setCpuFrequencyMhz(160); // ⚡ Palautetaan täydet tehot mittausta varten
+    Serial.println("BLE connected -> ACTIVE MODE");
   }
+  
   void onDisconnect(BLEServer* s) override {
     bleConnected = false;
-    Serial.println("BLE disconnected");
-    s->startAdvertising();
+    Serial.println("BLE disconnected -> IDLE MODE");
+    
+    // 💤 1. Tiputetaan prosessorin tehot puoleen
+    setCpuFrequencyMhz(80); 
+
+    // 💤 2. Hidastetaan BLE-mainontaa huomattavasti
+    // 0x800 (hex) on noin 1.28 sekuntia. Normaali on 0x100 (160ms).
+    BLEAdvertising* adv = s->getAdvertising();
+    adv->setMinInterval(0x800);
+    adv->setMaxInterval(0x800);
+    adv->start();
   }
 };
 
@@ -67,15 +78,24 @@ BLEDevice::init("VBT-Sensor");
 }
 
 
+static float lastSentVel = -1.0f; // Pitää muistissa edellisen lähetetyn arvon
+
 void sendVelocityNotify(float velocity) {
-    unsigned long now = millis();
-  // BLE velocity notify @ 12.5 Hz
+  unsigned long now = millis();
+  
   if (bleConnected && (now - lastVelNotifyMs >= VEL_NOTIFY_INTERVAL_MS)) {
-    
     lastVelNotifyMs = now;
-    char buf[16];
-    dtostrf(velocity, 4, 3, buf);
-    pVelocityCharacteristic->setValue(buf);
-    pVelocityCharacteristic->notify();
+    
+    if (!pVelocityCharacteristic) return;
+
+    // VBT UI-OPTIMOINTI: Lähetetään dataa vain jos ollaan liikkeessä, 
+    // TAI jos juuri pysähdyttiin (lähetetään tasan yksi nolla, jotta graafi laskee pohjaan).
+    if (velocity > 0.01f || lastSentVel > 0.01f) {
+      char buf[16];
+      dtostrf(velocity, 4, 3, buf);
+      pVelocityCharacteristic->setValue(buf);
+      pVelocityCharacteristic->notify();
+      lastSentVel = velocity;
+    }
   }
 }

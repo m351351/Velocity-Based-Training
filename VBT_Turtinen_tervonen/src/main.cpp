@@ -35,12 +35,17 @@ void setup() {
 
 
 void loop() {
-  
+  if (!bleConnected) {
+    // LEPOTILA 💤
+    handleBattery(); // Tarkistaa akun yhä (esim. 10s välein, kuten koodasit)
+    delay(200);      // KRIITTINEN: Tämä 200ms antaa ESP32:n nukkua taustalla!
+    return;          // Hypätään alkuun, ei lueta antureita
+  }
+
+  // AKTIIVITILA ⚡
   handleBattery();
   handleMotion();
   sendVelocityNotify(velocity);
 
-
-
-  delay(5);
+  delay(5); // Aktiivitilassa vain pieni viive
 }

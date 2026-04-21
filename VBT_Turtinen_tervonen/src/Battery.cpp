@@ -64,26 +64,22 @@ uint8_t readBatteryPercent(float* outVoltage, int* outRaw) {
 
 
 
-void updateBattery(bool doNotify = true) {
+void updateBattery(bool doNotify) { // A) Default-arg pois .cpp:stä
   float voltage = 0.0f;
   int raw = 0;
   int batt = readBatteryPercent(&voltage, &raw);
 
   bool shouldSend = (lastSentBattery < 0) || (abs(batt - lastSentBattery) >= BATT_HYST_PCT);
+  
   if (shouldSend) {
+    // C) Null-check: Jos pointteri on tyhjä, poistutaan heti
+    if (!pBatteryCharacteristic) return; 
+
     uint8_t b = (uint8_t)batt;
     pBatteryCharacteristic->setValue(&b, 1);
     if (doNotify && bleConnected) pBatteryCharacteristic->notify();
     lastSentBattery = batt;
   }
-
-  Serial.print("Battery raw=");
-  Serial.print(raw);
-  Serial.print(" V=");
-  Serial.print(voltage, 3);
-  Serial.print(" pct=");
-  Serial.print(batt);
-  Serial.println("%");
 }
 
 
