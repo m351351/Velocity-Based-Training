@@ -5,7 +5,15 @@ ExerciseParams getExerciseParams(ExerciseType type) {
         case CLEAN:
             // Rinnalleveto on nopea: vaatii selvän alun ja tavoitenopeus on korkea
             return {"Rinnalleveto", 0.30f, 0.10f, 1.10f, 1.50f};
-        
+
+        case SNATCH:
+            // Tempaus: Maailman nopein liike, vaatii korkean kynnyksen, ettei alkuasento kolise toistoksi
+            return {"Tempaus", 0.35f, 0.15f, 1.30f, 1.80f};
+            
+        case CLEAN_AND_JERK:
+            // Rinnalleveto + Työntö: Yhdistelmäliike, pidetään kynnys korkeana
+            return {"Rinnalleveto + Työntö", 0.32f, 0.12f, 1.00f, 1.40f};
+
         case SQUAT:
             // Kyykky on hitaampi: reagoi herkemmin pieneenkin liikkeeseen
             return {"Kyykky", 0.12f, 0.05f, 0.50f, 0.70f};

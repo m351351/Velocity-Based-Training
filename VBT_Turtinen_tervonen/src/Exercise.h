@@ -5,6 +5,8 @@
 
 enum ExerciseType {
     CLEAN,          // Rinnalleveto
+    SNATCH,         // Tempaus
+    CLEAN_AND_JERK, // Rinnalleveto + työntö
     SQUAT,          // Kyykky
     BENCH_PRESS,    // Penkkipunnerrus
     DEADLIFT        // Maastaveto
