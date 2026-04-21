@@ -70,7 +70,11 @@ void updateBattery(bool doNotify = true) {
   int batt = readBatteryPercent(&voltage, &raw);
 
   bool shouldSend = (lastSentBattery < 0) || (abs(batt - lastSentBattery) >= BATT_HYST_PCT);
+
   if (shouldSend) {
+    // C) Null-check: Jos pointteri on tyhjä, poistutaan heti
+    if (!pBatteryCharacteristic) return; 
+
     uint8_t b = (uint8_t)batt;
     pBatteryCharacteristic->setValue(&b, 1);
     if (doNotify && bleConnected) pBatteryCharacteristic->notify();

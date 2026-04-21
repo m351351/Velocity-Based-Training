@@ -12,8 +12,6 @@
 
 BoschSensorClass imu(Wire);
 
-
-
 void setup() {
   Serial.begin(115200);
   delay(300);
@@ -33,14 +31,18 @@ void setup() {
 }
 
 
-
 void loop() {
+
+    if (!bleConnected) {
+    // LEPOTILA 💤
+    handleBattery(); 
+    delay(200);      // KRIITTINEN: Tämä 200ms antaa ESP32:n nukkua taustalla!
+    return;          
+  }
   
   handleBattery();
   handleMotion();
   sendVelocityNotify(velocity);
-
-
 
   delay(5);
 }

@@ -1,6 +1,6 @@
 #ifndef BLE_HANDLER_H
 #define BLE_HANDLER_H
-
+#include <esp32-hal-cpu.h>
 #include <Arduino.h>
 #include <BLEDevice.h>
 
