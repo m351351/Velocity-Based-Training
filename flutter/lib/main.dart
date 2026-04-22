@@ -69,21 +69,26 @@ class _VBTPageState extends State<VBTPage> {
           _xValue += 1;
           _spots.add(FlSpot(_xValue, velocity));
 
-          if (velocity > 0.15) {
+          if (velocity > 0.12) {
             _repSamples.add(velocity);
             if (velocity > _peakOfRep) _peakOfRep = velocity;
-          }else if (velocity <= 0.1 && _repSamples.length > 3) {
-            // TOISTO PÄÄTTYI
-            _meanOfRep = _repSamples.reduce((a, b) => a + b) / _repSamples.length;
-            _repSamples.clear();
-            
-            _repCount++; // Kasvatetaan laskuria
-            
-            // SOITETAAN ÄÄNIMERKKI (lyhyt piippaus)
-            _audioPlayer.play(AssetSource('beep.mp3')); 
-
           }
+          else if (velocity <= 0.05 && _repSamples.length >= 5) {
+          
+          // TARKISTUS: Hyväksytään vain, jos huipun nopeus oli riittävä
+          if (_peakOfRep >= 0.20) {
+            _meanOfRep = _repSamples.reduce((a, b) => a + b) / _repSamples.length;
+            _repCount++;
+            _audioPlayer.play(AssetSource('beep.mp3'));
+          }
+          _repSamples.clear();
+          _peakOfRep = 0; // Tärkeää nollata huippu toiston jälkeen
+        } 
+        else if (velocity <= 0.05) {
+          _repSamples.clear();
+          _peakOfRep = 0;
         }
+      }
       });
     }
   });
