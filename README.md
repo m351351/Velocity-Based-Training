@@ -1,6 +1,6 @@
 # Velocity-Based Training (VBT) - Device
 
-[Suomeksi](README.md) | [In English](README_en.md)
+[Suomeksi](README.md) | [In English](README_eng.md)
 
 ---
 
