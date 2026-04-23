@@ -67,22 +67,22 @@ Projekti toteutettiin ketterillä menetelmillä ja se sisälsi seuraavat vaiheet
 ## Kuvat
 
 ### Piirilevyn valmistus
-![Piirilevy ja stensiili](PCB_and_stencil.png)
+![Piirilevy ja stensiili](docs/PCB_and_stencil.png)
 Kuvassa piirilevy on upotettu pahvimuottiin, jonka päälle stensiili saadaan asetettua tiiviisti piirilevyä vasten pastan levitystä varten.
 
-![Component placing](component_placing.png)
+![Component placing](docs/component_placing.png)
 Komponentit aseteltiin piirilevylle käsin.
 
-![BMI270](BMI270.png)
+![BMI270](docs/BMI270.png)
 BMI270 komponentti on pieni ja sen padit ovat osan pohjassa, joten sen kanssa piti olla erityisen tarkka asetellessa sitä piirilevylle.
 
-![ready](PCB_ready.png)
+![ready](docs/PCB_ready.png)
 Valmis ja uunitettu piirilevy sekä akku.
 
-![flutterApplication](flutterApplication.jpg)
+![flutterApplication](docs/flutterApplication.jpg)
 Kuva käyttöliittymästä.
 ### Järjestelmäkaavio
-*![Lohkokaavio](lohkokaavio1.0.png)*
+*![Lohkokaavio](docs/lohkokaavio1.0.png)*
 
 ## Tulevaisuus
 Tulevaisuudessa ohjelmistoa on tarkoitus kehittää niin, että eri nostoliikkeistä (takakyykky, maastaveto, penkkipunnerrus, tempaus, rinnalleveto ja rinnalleveto + työntö) on olemassa valmiit datasetit joiden perusteella ohjelma pystyy antamaan selkeän palautteen onko suoritus onnistunut ja mikä on nostajan kehityskaari. Tässä vaiheessa pääpaino on siinä, että laite toimii luotettavasti ja tehokkaasti, pystyy siirtämään ja näyttämään dataa reaaliaikaisesti, sekä seuraamaan akun varausta.
