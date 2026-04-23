@@ -17,6 +17,11 @@ Projektin tavoitteena on suunnitella ja toteuttaa Velocity-Based Training (VBT) 
 
 Laite kiinnitetään tankoon, ja se lähettää kiihtyvyysdataa langattomasti Android-puhelimeen, joka visualisoi tiedon käyttäjälle graafisessa muodossa.
 
+## Posteri
+Juliste tarjoaa tiivistetyn yleiskuvan projektin tavoitteista, menetelmistä ja keskeisistä tuloksista.
+![Posteri](docs/posteriTurtinenTervonen.png)
+
+
 ## Laitteisto ja komponentit
 Piirilevy (PCB) on suunniteltu **KiCadilla** noudattaen **Aislerin** suunnittelusääntöjä: [aisler-support](https://github.com/AislerHQ/aisler-support). Laitteen sydämenä toimii ESP32-mikrokontrolleri.
 
