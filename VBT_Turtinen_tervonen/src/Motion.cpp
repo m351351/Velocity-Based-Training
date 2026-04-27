@@ -95,7 +95,7 @@ void handleMotion() {
             float dot = (ax * cal_ax + ay * cal_ay + az * cal_az) / cal_mag;
             float dynamicAccG = dot - cal_mag;
 
-            // 1. LEPOTILAN TUNNISTUS JA FYSIIKKA
+            //LEPOTILAN TUNNISTUS JA FYSIIKKA
             if (fabsf(dynamicAccG) < 0.04f && fabsf(internalVelocity) < 0.08f) {
                 if (restStableMs == 0) restStableMs = now; // Lepotilan alkamisaika
                 
@@ -116,21 +116,21 @@ void handleMotion() {
                     internalVelocity += dynamicAccG * 9.81f * dt;
                 }
                 
-                // ÄLYKÄS NOPEUDEN HALLINTA (Korjaa roikkumaan jäävän nopeuden ja "seinään" osumisen)
+                // Nopeuden hallinta: Pehmennetään nopeuden laskua hidastusvaiheessa ja pysähdyksissä
                 if (internalVelocity > 0.0f) {
                     if (dynamicAccG < -0.04f) {
-                        // 1. Hidastuvaihe: Painovoima iskee vastaan. Pehmennetään käyrää hieman.
+                        // Hidastuvaihe: Painovoima iskee vastaan. Pehmennetään käyrää hieman.
                         internalVelocity *= 0.95f; 
                     } else if (fabsf(dynamicAccG) <= 0.04f) {
-                        // 2. Pysähdys (Deadband): Tanko on pysähtynyt! Tapetaan "haamunopeus" heti pois.
+                        // Pysähdys = haamunopeus pois
                         internalVelocity *= 0.80f; 
                     }
-                    // 3. Aktiivinen työntö (dynamicAccG > 0.04f): EI JARRUA. Saat pitää nopeutesi!
+                    
                 } else {
                     // Tapetaan mahdolliset miinukselle valuvat nopeudet nopeasti
                     internalVelocity *= 0.80f;
                 }
-            } // <--- TÄMÄ SULKU OLI SE MIKÄ SINULTA HUKKUI!
+            }
 
             // Rajoitetaan sisäinen nopeus
             internalVelocity = constrain(internalVelocity, -0.5f, 10.0f);
