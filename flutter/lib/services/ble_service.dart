@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'dart:typed_data';
 
 class BLEService {
   static const String kServiceUuid = "12345678-1234-1234-1234-123456789abc";
@@ -35,18 +37,21 @@ Future<void> connect(BluetoothDevice d) async {
       }
     }
 
-    // 1. Nopeusdatan tilaus
+    // 1. Nopeusdatan tilaus (UUSI 50 Hz BINÄÄRIPURKU)
     if (velocityChar != null) {
       await velocityChar!.setNotifyValue(true);
       velocityChar!.onValueReceived.listen((data) {
-        if (data.isNotEmpty) {
-          final raw = utf8.decode(data).trim();
-          final val = double.tryParse(raw);
-          if (val != null) _velocityController.add(val);
+        // Varmistetaan, että saimme tasan 4 tavua (C++ Float32 on 4 tavua)
+        if (data.length == 4) {
+          // Muunnetaan tavut suoraan desimaaliluvuksi (Little Endian -järjestys)
+          final val = ByteData.sublistView(Uint8List.fromList(data)).getFloat32(0, Endian.little);
+          
+          // Syötetään luku suoraan streamiin main.dartin käytettäväksi
+          _velocityController.add(val);
         }
       });
     }
-
+    
     // 2. Akun tilan tilaus ja alkulukeminen
     if (batteryChar != null) {
       // Tilataan automaattiset päivitykset
@@ -64,7 +69,7 @@ Future<void> connect(BluetoothDevice d) async {
           _batteryController.add(initialBattery[0]);
         }
       } catch (e) {
-        print("Akun alkulukeminen epäonnistui: $e");
+        debugPrint("Akun alkulukeminen epäonnistui: $e");
       }
     }
   }

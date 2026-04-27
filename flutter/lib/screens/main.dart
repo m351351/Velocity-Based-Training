@@ -37,6 +37,7 @@ class VBTPage extends StatefulWidget {
 class _VBTPageState extends State<VBTPage> {
   final BLEService _bleService = BLEService();
 
+  Color _scaffoldBgColor = const Color(0xFF121212); // Oletus musta
 
   final AudioPlayer _audioPlayer = AudioPlayer(); // Äänisoitin
   int _repCount = 0;// Toistolaskuri
@@ -56,6 +57,17 @@ class _VBTPageState extends State<VBTPage> {
   double _meanOfRep = 0.0;     // Toiston keskinopeus
   List<double> _repSamples = []; // Tämän hetkisen toiston kaikki näytteet
 
+  int _goodReps = 0;   
+  int _fastReps = 0;   
+  int _slowReps = 0;
+  List<String> _sessionFeedbacks = []; // Tallentaa jokaisen toiston sanallisen palautteen
+  List<double> _repValues = []; // Tallentaa jokaisen toiston nopeuden (m/s)
+
+  String _lastFeedbackText = "Valmis sarjaan";
+
+
+
+
   @override
   void initState() {
     super.initState();
@@ -69,18 +81,64 @@ class _VBTPageState extends State<VBTPage> {
           _xValue += 1;
           _spots.add(FlSpot(_xValue, velocity));
 
-          if (velocity > 0.12) {
+          if (velocity > 0.18) {
             _repSamples.add(velocity);
             if (velocity > _peakOfRep) _peakOfRep = velocity;
           }
-          else if (velocity <= 0.05 && _repSamples.length >= 5) {
+          else if (velocity <= 0.03 && _repSamples.length >= 10) {
           
           // TARKISTUS: Hyväksytään vain, jos huipun nopeus oli riittävä
-          if (_peakOfRep >= 0.20) {
+          if (_peakOfRep >= 0.25) {
             _meanOfRep = _repSamples.reduce((a, b) => a + b) / _repSamples.length;
             _repCount++;
-            _audioPlayer.play(AssetSource('beep.mp3'));
-          }
+
+            String currentFeedback = "";
+
+              // Valitaan vertailuarvo: Painonnosto (ID 0, 4, 5) -> Peak, muut -> Mean
+              double velocityToJudge = (_currentExercise.id == 0 || _currentExercise.id >= 4) 
+                  ? _peakOfRep 
+                  : _meanOfRep;
+
+              // A. TAKAKYYKKY JA MUUT VOIMAVERTAILUT (Mean Velocity)
+            if (_currentExercise.id >= 1 && _currentExercise.id <= 3) {
+                          if (velocityToJudge > 1.3) {
+                            currentFeedback = "Räjähtävä aloitus! (0–30% 1RM)";
+                            _fastReps++;
+                          } else if (velocityToJudge >= 1.0) {
+                            currentFeedback = "Nopeusvoima-alue (30–50% 1RM)";
+                            _goodReps++;
+                          } else if (velocityToJudge >= 0.75) {
+                            currentFeedback = "Voimanopeus (50–70% 1RM)";
+                            _goodReps++;
+                          } else if (velocityToJudge >= 0.5) {
+                            currentFeedback = "Raskas perusvoimasarja (70–85% 1RM)";
+                            _goodReps++;
+                          } else {
+                            currentFeedback = "Maksimivoima-alue! (85–100% 1RM)";
+                            _slowReps++;
+                          }
+                        } 
+                        // 2. PAINONNOSTOLIIKKEET (Tempaus, Rinnalleveto, Työntö)
+                        else {
+                          if (_currentExercise.name == "Tempaus") {
+                            currentFeedback = velocityToJudge >= 1.85 ? "Täydellinen räjähdys!" : "Hidas kakkosveto!";
+                          } else {
+                            currentFeedback = velocityToJudge >= 1.45 ? "Hyvä räjähdys!" : "Hidas kakkosveto!";
+                          }
+                          _goodReps++; 
+                        }
+
+              setState(() {
+                _lastFeedbackText = currentFeedback; // Päivitetään teksti ensin
+                _sessionFeedbacks.add(currentFeedback);
+                _repValues.add(velocityToJudge);
+              });
+
+              _audioPlayer.play(AssetSource('beep.mp3'));
+              _triggerFlash();
+            }
+
+
           _repSamples.clear();
           _peakOfRep = 0; // Tärkeää nollata huippu toiston jälkeen
         } 
@@ -124,6 +182,116 @@ class _VBTPageState extends State<VBTPage> {
       debugPrint("Skannausvirhe: $e");
     }
   }
+
+  void _triggerFlash() {
+    // Valitaan vertailuarvo liikkeen mukaan
+    double valueToCompare = (_currentExercise.id == 0 || _currentExercise.id >= 4) 
+        ? _peakOfRep 
+        : _meanOfRep;
+
+    setState(() {
+      if (valueToCompare < _currentExercise.minTarget) {
+        _scaffoldBgColor = Colors.redAccent.withValues(alpha: 0.3); // Liian hidas
+      } else if (valueToCompare > _currentExercise.maxTarget) {
+        _scaffoldBgColor = const Color.fromARGB(255, 224, 175, 42).withValues(alpha: 0.3); // Liian nopea / kevyt
+      } else {
+        _scaffoldBgColor = const Color.fromARGB(255, 59, 179, 4).withValues(alpha: 0.3); // Optimaalinen!
+      }
+    });
+
+    // Palautetaan tausta takaisin mustaksi 600ms viiveellä
+    Future.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) {
+        setState(() {
+          _scaffoldBgColor = const Color(0xFF121212);
+        });
+      }
+    });
+  }
+
+
+void _showSessionSummary() {
+  // Lasketaan koko sarjan keskiarvo
+  double totalAverage = 0;
+  if (_repValues.isNotEmpty) {
+    totalAverage = _repValues.reduce((a, b) => a + b) / _repValues.length;
+  }
+
+  showDialog(
+    context: context,
+    builder: (BuildContext context) {
+      return AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: Text("${_currentExercise.name} - Tulokset", 
+              style: const TextStyle(color: Colors.cyanAccent)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _summaryRow("Toistot yhteensä:", "$_repCount", Colors.white),
+              // NÄYTETÄÄN KOKONAISKESKIARVO TÄSSÄ
+              _summaryRow(
+                _currentExercise.id == 0 || _currentExercise.id >= 4 
+                    ? "Peak keskiarvo:" 
+                    : "Mean keskiarvo:", 
+                "${totalAverage.toStringAsFixed(2)} m/s", 
+                Colors.yellowAccent
+              ),
+              const Divider(color: Colors.white24),
+              const Text("TOISTOKOHTAINEN PALAUTE:", 
+                    style: TextStyle(fontSize: 10, color: Colors.grey)),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 200,
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _sessionFeedbacks.length,
+                  itemBuilder: (context, index) {
+                    return ListTile(
+                      dense: true,
+                      leading: CircleAvatar(
+                        backgroundColor: Colors.cyanAccent,
+                        radius: 12,
+                        child: Text("${index + 1}", 
+                               style: const TextStyle(fontSize: 10, color: Colors.black)),
+                      ),
+                      // Näytetään sekä sanallinen palaute että yksittäisen noston nopeus
+                      title: Text(_sessionFeedbacks[index], 
+                             style: const TextStyle(color: Colors.white, fontSize: 14)),
+                      trailing: Text("${_repValues[index].toStringAsFixed(2)} m/s",
+                             style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("SULJE", style: TextStyle(color: Colors.cyanAccent)),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+  Widget _summaryRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70)),
+          Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 18)),
+        ],
+      ),
+    );
+  }
+
 
   void _showDevicePicker() {
     showModalBottomSheet(
@@ -189,8 +357,11 @@ class _VBTPageState extends State<VBTPage> {
     }
 
     return Scaffold(
+      backgroundColor: _scaffoldBgColor,
       appBar: AppBar(
-        title: const Text("VBT ANALYZER"),
+        backgroundColor: Colors.transparent, // Valinnainen: tekee välähdyksestä tyylikkäämmän
+        elevation: 0,
+        title: const Text("Velocity Based Training"),
         actions: [
           if (_isConnected) 
             Center(child: Padding(
@@ -199,8 +370,26 @@ class _VBTPageState extends State<VBTPage> {
             )),
         ],
       ),
+
       body: Column(
         children: [
+
+          // build-metodin sisällä Columnin alussa:
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            color: _getHeroColor().withValues(alpha: 0.2), // Taustaväri palautteen mukaan
+            child: Text(
+              _lastFeedbackText,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _getHeroColor(),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
@@ -228,7 +417,7 @@ class _VBTPageState extends State<VBTPage> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.cyanAccent.withOpacity(0.5)),
+                border: Border.all(color: Colors.cyanAccent.withValues(alpha: 0.5)),
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
@@ -242,9 +431,7 @@ class _VBTPageState extends State<VBTPage> {
                       setState(() {
                         _currentExercise = exerciseData[newValue]!;
                         _bleService.sendExercise(_currentExercise.id);
-                        // Nollataan edellisen liikkeen huiput
-                        _peakOfRep = 0;
-                        _meanOfRep = 0;
+
                       });
                     }
                   },
@@ -263,17 +450,17 @@ class _VBTPageState extends State<VBTPage> {
                   Text(
                     "REPS: $_repCount",
                     style: const TextStyle(
-                      fontSize: 30, 
+                      fontSize: 20, 
                       color: Colors.cyanAccent, 
                       fontWeight: FontWeight.bold
                     ),
                   ),
-                  const SizedBox(height: 10), // Pieni väli laskurin ja nopeuden välissä
+                  const SizedBox(height: 0.5), // Pieni väli laskurin ja nopeuden välissä
                   
                   Text(
                     displayValue,
                     style: TextStyle(
-                      fontSize: 100, 
+                      fontSize: 90, 
                       fontWeight: FontWeight.bold,
                       color: _getHeroColor(),
                     ),
@@ -313,17 +500,25 @@ class _VBTPageState extends State<VBTPage> {
                   ),
                   onPressed: () {
                     setState(() {
-                      if (!_isRecording) {
-                        _spots.clear();
-                        _xValue = 0;
-                        _peakOfRep = 0; // NOLLAUS UUDELLE SARJALLE
-                        _meanOfRep = 0;
-                        _repCount = 0;
-                        _repSamples.clear();
-                      }
-                      _isRecording = !_isRecording;
-                    });
-                  },
+                        if (_isRecording) {
+                          // Kun lopetetaan, näytetään kooste
+                          _showSessionSummary();
+                        } else {
+                          // Kun aloitetaan uusi, nollataan kaikki
+                          _spots.clear();
+                          _xValue = 0;
+                          _peakOfRep = 0;
+                          _meanOfRep = 0;
+                          _repCount = 0;
+                          _goodReps = 0;
+                          _fastReps = 0;
+                          _slowReps = 0;
+                          _repSamples.clear();
+                          _sessionFeedbacks.clear();
+                        }
+                        _isRecording = !_isRecording;
+                      });
+                    },
                   child: Text(
                     _isRecording ? "LOPETA SARJA" : "ALOITA SARJA",
                     style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),

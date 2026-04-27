@@ -25,7 +25,7 @@ class VelocityChart extends StatelessWidget {
             isCurved: true,
             color: lineColor,
             barWidth: 4,
-            belowBarData: BarAreaData(show: true, color: lineColor.withOpacity(0.1)),
+            belowBarData: BarAreaData(show: true, color: lineColor.withValues(alpha: 0.3)),
           ),
         ],
         titlesData: const FlTitlesData(show: false), // Pidetään simppelinä aluksi
