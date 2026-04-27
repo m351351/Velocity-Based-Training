@@ -12,5 +12,5 @@ void calibrateMotion();
 
 extern float velocity; // Julkinen muuttuja, jotta BLEHandler tai main voi lukea nopeuden
 extern ExerciseType currentExercise;
-
+extern bool inRep;
 #endif

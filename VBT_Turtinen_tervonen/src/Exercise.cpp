@@ -19,9 +19,11 @@ ExerciseParams getExerciseParams(ExerciseType type) {
             return {"Kyykky", 0.12f, 0.05f, 0.50f, 0.70f};
             
         case BENCH_PRESS:
+            // Penkkipunnerrus: Horisontaalinen liike, kohtuullinen nopeus
             return {"Penkkipunnerrus", 0.15f, 0.08f, 0.40f, 0.60f};
-            
+
         case DEADLIFT:
+            // Maastaveto: Yleisesti hitain liike, matalin threshold
             return {"Maastaveto", 0.10f, 0.05f, 0.30f, 0.50f};
             
         default:
