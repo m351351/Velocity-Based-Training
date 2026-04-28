@@ -83,11 +83,11 @@ The BMI270 component is small and its pads are on the bottom, so extra precision
 ![ready](docs/PCB_ready.png)
 The finished and reflowed PCB and the battery.
 
-<div align="center">
-  <video src="https://github.com/m351351/Velocity-Based-Training/raw/main/docs/SVID_20260428_093846_1.mp4" width="300" controls>
-    Video ei näy selaimessasi.
-  </video>
-</div>
+
+
+https://github.com/user-attachments/assets/65e12cbe-5f19-4288-899f-408d515f880d
+
+
 
 
 ### System Diagram
