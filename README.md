@@ -83,11 +83,11 @@ BMI270 komponentti on pieni ja sen padit ovat osan pohjassa, joten sen kanssa pi
 ![ready](docs/PCB_ready.png)
 Valmis ja uunitettu piirilevy sekä akku.
 
-<div align="center">
-  <video src="https://github.com/m351351/Velocity-Based-Training/raw/main/docs/SVID_20260428_093846_1.mp4" width="300" controls>
-    Video ei näy selaimessasi.
-  </video>
-</div>
+
+
+https://github.com/user-attachments/assets/68aac730-3347-450c-992c-2d826667e670
+
+
 Video käyttöliittymästä
 
 ### Järjestelmäkaavio
