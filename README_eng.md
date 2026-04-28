@@ -83,8 +83,12 @@ The BMI270 component is small and its pads are on the bottom, so extra precision
 ![ready](docs/PCB_ready.png)
 The finished and reflowed PCB and the battery.
 
-![flutterApplication](docs/flutterApplication.jpg)
-A picture of the user interface.
+<div align="center">
+  <video src="docs/SVID_20260428_093846_1.mp4" width="300" controls>
+    Video ei näy selaimessasi.
+  </video>
+</div>
+Video käyttöliittymästä
 
 ### System Diagram
 *![Block Diagram](docs/lohkokaavio1.0.png)*
